@@ -573,6 +573,41 @@ $('downloadMulti').addEventListener('click', async () => {
   $('backMulti').disabled = false;
 });
 
+// Max items being downloaded concurrently. Tuned so Moodle doesn't rate-limit
+// us — each fetchItem can itself fan out (folder/assign/page handlers fetch
+// multiple files), so effective parallelism is higher.
+const CONCURRENT_DOWNLOADS = 5;
+
+// Fetch every item in parallel with a concurrency cap. Results array stays in
+// original order so the ZIP and log don't reshuffle.
+async function fetchItemsParallel(items, concurrency, onProgress) {
+  const results = new Array(items.length);
+  const errors = [];
+  let nextIdx = 0;
+  let completed = 0;
+
+  async function worker() {
+    while (true) {
+      const i = nextIdx++;
+      if (i >= items.length) return;
+      const item = items[i];
+      try {
+        results[i] = await fetchItem(item);
+      } catch (e) {
+        errors.push({ item, err: e.message || String(e) });
+        results[i] = null;
+      } finally {
+        completed++;
+        onProgress?.(completed, items.length, item);
+      }
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return { results, errors };
+}
+
 // ========== Core download routine ==========
 async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   if (!silent) logEl.innerHTML = '';
@@ -582,40 +617,46 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   const links = [];      // generic URL activities
   const recordings = []; // streaming
   const events = [];     // calendar deadlines
-  const errors = [];
   const used = new Set();
 
+  // Phase 1: parallel fetch
+  setStatus(`מוריד ${items.length} פריטים במקביל (עד ${CONCURRENT_DOWNLOADS} בו-זמנית)...`);
+  const { results, errors } = await fetchItemsParallel(items, CONCURRENT_DOWNLOADS,
+    (done, total, item) => {
+      setStatus(`(${done}/${total}) הושלם: ${item.name}`);
+      setProgress(done, total);
+    });
+
+  if (!silent) {
+    for (const { item, err } of errors) logLine(`✗ ${item.name}: ${err}`, 'err');
+  }
+
+  // Phase 2: assemble paths in original order (so the ZIP and log are stable)
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    setStatus(`(${i + 1}/${items.length}) ${item.name}`);
-    setProgress(i, items.length);
-    try {
-      const got = await fetchItem(item);
-      for (const r of got) {
-        if (r.kind === 'recording') recordings.push(r);
-        else if (r.kind === 'link') links.push(r);
-        else if (r.kind === 'event') events.push(r.event);
-        else {
-          // Each downloaded file goes into two places in the ZIP:
-          // 1) sections/<NN - section name>/<internal path>  — mirror of Moodle's section layout
-          // 2) "00 - כל הקבצים"/<filename>                   — single flat folder with everything
-          const sectionIdx = item.sectionIdx ?? 0;
-          const sectionNum = String(sectionIdx + 1).padStart(2, '0');
-          const sectionName = sanitizeFilename(item.section || 'כללי') || 'כללי';
-          const sectionPath = uniquePath(used, `${sectionNum} - ${sectionName}/${r.path}`);
-          files.push({ path: sectionPath, blob: r.blob });
-          if (!silent) logLine(`✓ ${sectionPath} (${formatSize(r.blob.size)})`, 'ok');
+    const got = results[i];
+    if (!got) continue;
+    for (const r of got) {
+      if (r.kind === 'recording') recordings.push(r);
+      else if (r.kind === 'link') links.push(r);
+      else if (r.kind === 'event') events.push(r.event);
+      else {
+        // Each downloaded file goes into two places in the ZIP:
+        // 1) sections/<NN - section name>/<internal path>  — mirror of Moodle's section layout
+        // 2) "00 - כל הקבצים"/<filename>                   — single flat folder with everything
+        const sectionIdx = item.sectionIdx ?? 0;
+        const sectionNum = String(sectionIdx + 1).padStart(2, '0');
+        const sectionName = sanitizeFilename(item.section || 'כללי') || 'כללי';
+        const sectionPath = uniquePath(used, `${sectionNum} - ${sectionName}/${r.path}`);
+        files.push({ path: sectionPath, blob: r.blob });
+        if (!silent) logLine(`✓ ${sectionPath} (${formatSize(r.blob.size)})`, 'ok');
 
-          const filename = r.path.split('/').pop();
-          const isSubmission = r.path.includes('/_הגשות שלי/');
-          const flatRel = isSubmission ? `_הגשות שלי/${filename}` : filename;
-          const flatPath = uniquePath(used, `00 - כל הקבצים/${flatRel}`);
-          files.push({ path: flatPath, blob: r.blob });
-        }
+        const filename = r.path.split('/').pop();
+        const isSubmission = r.path.includes('/_הגשות שלי/');
+        const flatRel = isSubmission ? `_הגשות שלי/${filename}` : filename;
+        const flatPath = uniquePath(used, `00 - כל הקבצים/${flatRel}`);
+        files.push({ path: flatPath, blob: r.blob });
       }
-    } catch (e) {
-      errors.push({ item, err: e.message });
-      if (!silent) logLine(`✗ ${item.name}: ${e.message}`, 'err');
     }
   }
 
