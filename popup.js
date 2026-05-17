@@ -78,15 +78,12 @@ $('scan').addEventListener('click', async () => {
 
     if (/zoom\.us/.test(tab.url)) {
       setStatus('ממתין שדף ה-Zoom ייטען...');
-      // Wait for the SPA to render its rows; poll until row count stabilizes.
-      await waitForZoomList(tab.id);
-      setStatus('סורק טבלת הקלטות...');
-      const data = await extractZoomRecordings(tab.id);
+      const data = await scrapeAllZoomPages(tab.id, (s) => setStatus(s));
       await saveZoomFile(data);
       if (data.recordings.length === 0) {
         setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד לפרטים.');
       } else {
-        setStatus(`הושלם: ${data.recordings.length} הקלטות.`);
+        setStatus(`הושלם: ${data.recordings.length} הקלטות מ-${data.pages} עמודים.`);
         notify('Moodle Hoarder', `נמצאו ${data.recordings.length} הקלטות Zoom`);
       }
       $('scan').disabled = false;
@@ -993,8 +990,8 @@ function scrapeZoomPage() {
   const ZOOM_ID_RE = /\b(\d{3,4}\s+\d{3,4}\s+\d{3,4})\b/;
   // Dates: "May 19, 2025 8:42 AM" / "19/05/2025 8:42" / "2025-05-19"
   const DATE_RE = /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}(?:[\s,]+\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)?|\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2})?|\d{4}-\d{1,2}-\d{1,2})/;
-  // Duration: "1h 30m" / "45m" / "1 hr 30 min"
-  const DUR_RE = /(\d+\s*(?:h|hr|hrs|שעות|שעה)(?:\s*\d+\s*(?:m|min|mins|דקות))?|\d+\s*(?:m|min|mins|דקות))/i;
+  // Duration: "1h 30m" / "45m" / "1 hr 30 min" (require word-boundary + space, to avoid catching meeting ID digits)
+  const DUR_RE = /(?:^|\s)(\d{1,2}\s*(?:hr|hrs|hours|h)(?:\s*\d{1,2}\s*(?:min|mins|m))?|\d{1,3}\s*(?:min|mins|minutes)|\d{1,2}\s*(?:שעות|שעה)(?:\s*\d{1,2}\s*דקות)?|\d{1,3}\s*דקות)(?=\s|$)/i;
 
   const debug = { tables: 0, totalRows: 0, candidateRows: 0 };
   const recordings = [];
@@ -1022,7 +1019,7 @@ function scrapeZoomPage() {
       for (const t of cellTexts) {
         if (idMatch && t.includes(idMatch[0])) continue;
         if (dateMatch && t.includes(dateMatch[0])) continue;
-        if (durMatch && t === durMatch[0]) continue;
+        if (durMatch && t.trim() === (durMatch[1] || durMatch[0]).trim()) continue;
         if (/^\s*$/.test(t)) continue;
         topic = t;
         break;
@@ -1032,7 +1029,7 @@ function scrapeZoomPage() {
         topic,
         meetingId: idMatch ? idMatch[0].replace(/\s+/g, '') : '',
         date: dateMatch ? dateMatch[0] : '',
-        duration: durMatch ? durMatch[0] : '',
+        duration: durMatch ? (durMatch[1] || durMatch[0]).trim() : '',
         rawCells: cellTexts,
       });
     }
@@ -1076,7 +1073,7 @@ async function saveZoomFile(data) {
   lines.push('================================');
   lines.push(`Source: ${data.pageUrl || '(unknown)'}`);
   lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
-  lines.push(`Found:  ${data.recordings.length} recordings`);
+  lines.push(`Found:  ${data.recordings.length} recordings${data.pages > 1 ? ` (across ${data.pages} pages)` : ''}`);
   lines.push('');
 
   if (data.error) {
@@ -1111,6 +1108,7 @@ async function saveZoomFile(data) {
       if (r.meetingId) lines.push(`    Meeting ID: ${r.meetingId}`);
       if (r.date)      lines.push(`    Date:       ${r.date}`);
       if (r.duration)  lines.push(`    Duration:   ${r.duration}`);
+      if (r.page && data.pages > 1) lines.push(`    Page:       ${r.page}`);
       if (r.rawCells && r.rawCells.length) {
         lines.push(`    Raw:        ${r.rawCells.join(' | ')}`);
       }
@@ -1133,4 +1131,106 @@ async function saveZoomFile(data) {
     filename: `zoom-recordings_${date}.txt`,
     saveAs: false,
   });
+}
+
+// ===== Pagination =====
+// Walk through all pages of the Zoom recordings table. Clicks "Next", waits
+// for rows to render, dedupes across pages. Stops when no new rows arrive
+// or no Next button is found.
+async function scrapeAllZoomPages(tabId, onProgress) {
+  const all = [];
+  const debug = {};
+  const seen = new Set();
+  let pageNum = 1;
+  const MAX = 50;
+  let pageUrl = '';
+
+  while (pageNum <= MAX) {
+    onProgress?.(`(עמוד ${pageNum}) ממתין שיטענו השורות...`);
+    await waitForZoomList(tabId);
+    onProgress?.(`(עמוד ${pageNum}) סורק...`);
+    const data = await extractZoomRecordings(tabId);
+    if (data.pageUrl) pageUrl = data.pageUrl;
+    Object.assign(debug, data.debug || {});
+
+    let added = 0;
+    for (const r of data.recordings) {
+      const key = (r.meetingId || '') + '|' + (r.date || '') + '|' + (r.topic || '').slice(0, 30);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push({ ...r, page: pageNum });
+      added++;
+    }
+    onProgress?.(`(עמוד ${pageNum}) ${added} חדשים, סה"כ ${all.length}`);
+
+    // If first page returned nothing useful, stop (the page isn't a recordings list)
+    if (pageNum === 1 && all.length === 0) break;
+    // If this page added nothing, we've already seen everything → done
+    if (added === 0 && pageNum > 1) break;
+
+    onProgress?.(`(עמוד ${pageNum}) מעבר לעמוד הבא...`);
+    const advanced = await clickZoomNextPage(tabId);
+    if (!advanced) break;
+    // Give SPA time to swap rows, then waitForZoomList will confirm
+    await new Promise(r => setTimeout(r, 800));
+    pageNum++;
+  }
+
+  return { pageUrl, recordings: all, debug, frames: 0, pages: pageNum };
+}
+
+// Try several Next-button patterns, return true if we clicked one.
+async function clickZoomNextPage(tabId) {
+  let clickedAny = false;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const isDisabled = (el) => {
+          if (!el) return true;
+          if (el.disabled) return true;
+          if (el.getAttribute('aria-disabled') === 'true') return true;
+          const cls = (el.className || '').toString();
+          if (/\b(is-)?disabled\b/i.test(cls)) return true;
+          // Parent might carry the disabled state
+          const parent = el.closest('[aria-disabled="true"], .disabled, .is-disabled');
+          if (parent && parent !== document.body) return true;
+          return false;
+        };
+        // Selector candidates ordered by specificity
+        const selectors = [
+          'button[aria-label*="Next page" i]',
+          'button[aria-label*="next" i]',
+          'a[aria-label*="Next page" i]',
+          'a[aria-label*="next" i]',
+          '.zm-pagination__next',
+          '[class*="pagination"] [class*="next"]:not([class*="disabled"])',
+          'li.next:not(.disabled) a',
+          'li.next:not(.disabled) button',
+          '.pagination-next',
+          '[data-testid*="next" i]',
+        ];
+        for (const sel of selectors) {
+          for (const el of document.querySelectorAll(sel)) {
+            if (isDisabled(el)) continue;
+            el.click();
+            return { clicked: true, via: sel };
+          }
+        }
+        // Text-based fallback: "Next" / "הבא" / chevrons
+        const textCandidates = ['next', 'הבא', '›', '»', '>'];
+        for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+          if (isDisabled(el)) continue;
+          const t = (el.textContent || '').trim().toLowerCase();
+          if (textCandidates.includes(t)) {
+            el.click();
+            return { clicked: true, via: 'text:' + t };
+          }
+        }
+        return { clicked: false };
+      },
+    });
+    clickedAny = results.some(r => r?.result?.clicked);
+  } catch {}
+  return clickedAny;
 }
