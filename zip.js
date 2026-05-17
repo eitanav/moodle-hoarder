@@ -23,6 +23,23 @@ function dosDateTime(d = new Date()) {
   return { time, date };
 }
 
+// Info-ZIP Unicode Path Extra Field (0x7075). Adding this on every entry makes
+// the file display Hebrew (and other non-ASCII) names correctly even on
+// Windows Explorer's built-in ZIP, which often ignores the UTF-8 bit alone.
+// Layout: 2B HeaderID | 2B DataSize | 1B Version | 4B NameCRC32 | NB UnicodeName
+function makeUnicodePathExtra(nameBytes) {
+  const crc = crc32(nameBytes);
+  const dataLen = 5 + nameBytes.length;
+  const buf = new Uint8Array(4 + dataLen);
+  const dv = new DataView(buf.buffer);
+  dv.setUint16(0, 0x7075, true);
+  dv.setUint16(2, dataLen, true);
+  dv.setUint8(4, 1);
+  dv.setUint32(5, crc, true);
+  buf.set(nameBytes, 9);
+  return buf;
+}
+
 // files: Array<{ path: string, blob: Blob }>
 async function buildZip(files) {
   const encoder = new TextEncoder();
@@ -34,13 +51,14 @@ async function buildZip(files) {
   for (const { path, blob } of files) {
     const data = new Uint8Array(await blob.arrayBuffer());
     const nameBytes = encoder.encode(path);
+    const extra = makeUnicodePathExtra(nameBytes);
     const crc = crc32(data);
 
-    const lfh = new Uint8Array(30 + nameBytes.length);
+    const lfh = new Uint8Array(30 + nameBytes.length + extra.length);
     const lv = new DataView(lfh.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true); // UTF-8 names
+    lv.setUint16(6, 0x0800, true); // UTF-8 name flag (belt + suspenders)
     lv.setUint16(8, 0, true);      // method = store
     lv.setUint16(10, time, true);
     lv.setUint16(12, date, true);
@@ -48,11 +66,12 @@ async function buildZip(files) {
     lv.setUint32(18, data.length, true);
     lv.setUint32(22, data.length, true);
     lv.setUint16(26, nameBytes.length, true);
-    lv.setUint16(28, 0, true);
+    lv.setUint16(28, extra.length, true);
     lfh.set(nameBytes, 30);
+    lfh.set(extra, 30 + nameBytes.length);
     chunks.push(lfh, data);
 
-    const cdh = new Uint8Array(46 + nameBytes.length);
+    const cdh = new Uint8Array(46 + nameBytes.length + extra.length);
     const cv = new DataView(cdh.buffer);
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
@@ -65,8 +84,10 @@ async function buildZip(files) {
     cv.setUint32(20, data.length, true);
     cv.setUint32(24, data.length, true);
     cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, extra.length, true);
     cv.setUint32(42, offset, true);
     cdh.set(nameBytes, 46);
+    cdh.set(extra, 46 + nameBytes.length);
     central.push(cdh);
 
     offset += lfh.length + data.length;

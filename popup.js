@@ -21,6 +21,7 @@ const diffText      = $('diffText');
 
 let scanned = null;        // single course: { courseName, courseId, courseUrl, sections, prevSeen }
 let multiScanned = null;   // multi: { courses: [{id, name, url}] }
+let zoomScanned = null;    // zoom: { data: { recordings, pages, pageUrl }, tabId }
 
 // ---------- Constants ----------
 const ACTIVITY_RE = /\/mod\/(resource|folder|assign|url|page|book|forum|quiz|lesson|choice|feedback|workshop|wiki|chat|glossary|scorm|h5pactivity)\/view\.php\?(?:[^#]*&)?id=(\d+)/;
@@ -66,6 +67,8 @@ function showView(name) {
   initialView.style.display = name === 'initial' ? 'block' : 'none';
   pickerView.style.display  = name === 'picker'  ? 'block' : 'none';
   multiView.style.display   = name === 'multi'   ? 'block' : 'none';
+  const zoomView = document.getElementById('zoomPicker');
+  if (zoomView) zoomView.style.display = name === 'zoom' ? 'block' : 'none';
 }
 
 // ---------- Initial: scan button ----------
@@ -85,29 +88,8 @@ $('scan').addEventListener('click', async () => {
         $('scan').disabled = false;
         return;
       }
-      // Step 2: open each recording's detail page and extract its URLs.
-      setStatus(`נמצאו ${data.recordings.length} הקלטות. מתחיל פענוח קישורים — אל תסגור!`);
-      const debugHtml = await resolveZoomPlayUrls(tab.id, data.recordings, (s) => setStatus(s));
-      await saveZoomFile(data);
-      const ok = data.recordings.filter(r => r.shareUrls?.length).length;
-      // If nothing was found, dump the first detail page HTML so we can diagnose.
-      if (ok === 0 && debugHtml) {
-        const date = new Date().toISOString().slice(0, 10);
-        const dumpBlob = new Blob([
-          `<!-- Source URL: ${debugHtml.sourceUrl} -->\n<!-- Captured: ${new Date().toISOString()} -->\n`,
-          debugHtml.html,
-        ], { type: 'text/html;charset=utf-8' });
-        await chrome.downloads.download({
-          url: URL.createObjectURL(dumpBlob),
-          filename: `zoom-detail-debug_${date}.html`,
-          saveAs: false,
-        });
-        setStatus(`לא נמצאו URLs בדף ה-detail. גם הורד zoom-detail-debug HTML — שלח אותו כדי לקבל סלקטור מדויק.`);
-      } else {
-        setStatus(`הושלם: ${ok}/${data.recordings.length} קישורים נמצאו, מ-${data.pages} עמודים.`);
-      }
-      notify('Moodle Hoarder', `Zoom: ${ok}/${data.recordings.length} קישורים נחלצו`);
-      $('scan').disabled = false;
+      zoomScanned = { data, tabId: tab.id };
+      renderZoomPicker();
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
       setStatus('סורק קורסים...');
@@ -191,13 +173,20 @@ function extractCourse(doc) {
     const nameEl = sec.querySelector('.sectionname, h3.sectionname, .course-section-header, h3');
     const sName = (nameEl?.textContent || '').trim() || `קטע ${sections.length + 1}`;
     const items = collect(sec, sName);
-    if (items.length) sections.push({ name: sName, items });
+    if (items.length) {
+      const sIdx = sections.length;
+      for (const it of items) it.sectionIdx = sIdx;
+      sections.push({ name: sName, items });
+    }
   }
 
   if (!sections.length) {
     // Fallback: no section structure detected → one bucket
-    const all = collect(doc.body || doc, 'הכל');
-    if (all.length) sections.push({ name: 'הכל', items: all });
+    const all = collect(doc.body || doc, 'כללי');
+    if (all.length) {
+      for (const it of all) it.sectionIdx = 0;
+      sections.push({ name: 'כללי', items: all });
+    }
   }
 
   return { courseName, courseId, sections };
@@ -425,6 +414,99 @@ $('backMulti').addEventListener('click', () => {
   resetFooter();
 });
 
+// ========== Zoom picker (after scrape, before URL resolution) ==========
+function renderZoomPicker() {
+  showView('zoom');
+  const list = $('zoomItems');
+  list.innerHTML = '';
+  const recs = zoomScanned.data.recordings;
+  $('totZoom').textContent = recs.length;
+  for (const rec of recs) {
+    const li = document.createElement('li');
+    li.dataset.id = `${rec.meetingId || ''}|${rec.date || ''}|${(rec.topic || '').slice(0, 30)}`;
+    const dateShort = (rec.date || '').slice(0, 22);
+    const pageTag = zoomScanned.data.pages > 1 ? ` · p${rec.page}` : '';
+    li.innerHTML = `
+      <input type="checkbox" checked>
+      <div style="flex:1;overflow:hidden;">
+        <div class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        <div class="id"></div>
+      </div>`;
+    li.querySelector('.name').textContent = rec.topic || '(ללא שם)';
+    li.querySelector('.id').textContent = `${dateShort}${pageTag}`;
+    li.querySelector('input').addEventListener('change', updateZoomCount);
+    list.appendChild(li);
+  }
+  updateZoomCount();
+  setStatus('');
+}
+function updateZoomCount() {
+  const n = $('zoomItems').querySelectorAll('input[type=checkbox]:checked').length;
+  $('selZoom').textContent = n;
+  $('downloadZoom').disabled = n === 0;
+}
+$('zoomAll').addEventListener('click', () => {
+  $('zoomItems').querySelectorAll('li:not([style*="display: none"]) input').forEach(c => c.checked = true);
+  updateZoomCount();
+});
+$('zoomNone').addEventListener('click', () => {
+  $('zoomItems').querySelectorAll('li:not([style*="display: none"]) input').forEach(c => c.checked = false);
+  updateZoomCount();
+});
+$('searchZoom').addEventListener('input', () => {
+  const q = $('searchZoom').value.toLowerCase().trim();
+  $('zoomItems').querySelectorAll('li').forEach(li => {
+    const t = li.querySelector('.name').textContent.toLowerCase()
+            + ' ' + li.querySelector('.id').textContent.toLowerCase();
+    li.style.display = (q && !t.includes(q)) ? 'none' : '';
+  });
+});
+$('backZoom').addEventListener('click', () => {
+  showView('initial');
+  $('scan').disabled = false;
+  resetFooter();
+  zoomScanned = null;
+});
+
+$('downloadZoom').addEventListener('click', async () => {
+  if (!zoomScanned) return;
+  $('downloadZoom').disabled = true;
+  $('backZoom').disabled = true;
+  const allRecs = zoomScanned.data.recordings;
+  const checkedIds = new Set();
+  $('zoomItems').querySelectorAll('li').forEach(li => {
+    if (li.querySelector('input').checked) checkedIds.add(li.dataset.id);
+  });
+  const selected = allRecs.filter(r =>
+    checkedIds.has(`${r.meetingId || ''}|${r.date || ''}|${(r.topic || '').slice(0, 30)}`));
+  if (!selected.length) { $('backZoom').disabled = false; return; }
+
+  setStatus(`מתחיל פענוח קישורים ל-${selected.length} הקלטות — אל תסגור!`);
+  const debugHtml = await resolveZoomPlayUrls(zoomScanned.tabId, selected, (s) => setStatus(s));
+
+  // Output file contains only the selected recordings
+  const outData = { ...zoomScanned.data, recordings: selected };
+  await saveZoomFile(outData);
+  const ok = selected.filter(r => r.shareUrls?.length).length;
+  if (ok === 0 && debugHtml) {
+    const date = new Date().toISOString().slice(0, 10);
+    const dumpBlob = new Blob([
+      `<!-- Source URL: ${debugHtml.sourceUrl} -->\n<!-- Captured: ${new Date().toISOString()} -->\n`,
+      debugHtml.html,
+    ], { type: 'text/html;charset=utf-8' });
+    await chrome.downloads.download({
+      url: URL.createObjectURL(dumpBlob),
+      filename: `zoom-detail-debug_${date}.html`,
+      saveAs: false,
+    });
+    setStatus(`לא נמצאו URLs. הורד גם zoom-detail-debug HTML.`);
+  } else {
+    setStatus(`הושלם: ${ok}/${selected.length} קישורים נמצאו.`);
+  }
+  notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
+  $('backZoom').disabled = false;
+});
+
 // ========== Download (single course) ==========
 $('download').addEventListener('click', async () => {
   const selected = collectSelectedItems();
@@ -514,9 +596,21 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
         else if (r.kind === 'link') links.push(r);
         else if (r.kind === 'event') events.push(r.event);
         else {
-          r.path = uniquePath(used, r.path);
-          files.push(r);
-          if (!silent) logLine(`✓ ${r.path} (${formatSize(r.blob.size)})`, 'ok');
+          // Each downloaded file goes into two places in the ZIP:
+          // 1) sections/<NN - section name>/<internal path>  — mirror of Moodle's section layout
+          // 2) "00 - כל הקבצים"/<filename>                   — single flat folder with everything
+          const sectionIdx = item.sectionIdx ?? 0;
+          const sectionNum = String(sectionIdx + 1).padStart(2, '0');
+          const sectionName = sanitizeFilename(item.section || 'כללי') || 'כללי';
+          const sectionPath = uniquePath(used, `${sectionNum} - ${sectionName}/${r.path}`);
+          files.push({ path: sectionPath, blob: r.blob });
+          if (!silent) logLine(`✓ ${sectionPath} (${formatSize(r.blob.size)})`, 'ok');
+
+          const filename = r.path.split('/').pop();
+          const isSubmission = r.path.includes('/_הגשות שלי/');
+          const flatRel = isSubmission ? `_הגשות שלי/${filename}` : filename;
+          const flatPath = uniquePath(used, `00 - כל הקבצים/${flatRel}`);
+          files.push({ path: flatPath, blob: r.blob });
         }
       }
     } catch (e) {
@@ -663,7 +757,7 @@ async function fetchFolder(item) {
     if (res.ok && (ct.includes('zip') || ct.includes('octet-stream'))) {
       const blob = await res.blob();
       const fn = filenameFromResponse(res) || (sanitizeFilename(item.name) + '.zip');
-      return [{ path: `folders/${fn}`, blob }];
+      return [{ path: fn, blob }];
     }
   } catch {}
   // Fallback: scrape
@@ -678,7 +772,7 @@ async function fetchFolder(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(a.href.split('/').pop()) || 'file';
-      out.push({ path: `folders/${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${fn}`, blob });
     } catch {}
   }
   if (!out.length) throw new Error('תיקייה ריקה / חסומה');
@@ -703,7 +797,7 @@ async function fetchAssign(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(url.split('/').pop()) || 'file';
-      out.push({ path: `assignments/${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${fn}`, blob });
     } catch {}
   }
 
@@ -718,7 +812,7 @@ async function fetchAssign(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(url.split('/').pop()) || 'file';
-      out.push({ path: `submissions/${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/_הגשות שלי/${fn}`, blob });
     } catch {}
   }
 
@@ -800,7 +894,7 @@ async function fetchUrlActivity(item) {
         const blob = await r.blob();
         const fn = filenameFromResponse(r)
           || (sanitizeFilename(item.name) + (extFromCT(ct) || extFromUrl(external) || ''));
-        return [{ path: `urls/${fn}`, blob }];
+        return [{ path: fn, blob }];
       }
     }
   } catch {}
@@ -822,12 +916,12 @@ async function fetchPage(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(a.href.split('/').pop()) || 'file';
-      out.push({ path: `pages/${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${fn}`, blob });
     } catch {}
   }
   if (content.textContent.trim()) {
     const wrapped = `<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><title>${escapeHtml(item.name)}</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:780px;margin:24px auto;padding:0 16px;line-height:1.6}@media print{body{margin:0}}</style>${content.outerHTML}`;
-    out.push({ path: `pages/${folder}/index.html`, blob: new Blob([wrapped], { type: 'text/html;charset=utf-8' }) });
+    out.push({ path: `${folder}/index.html`, blob: new Blob([wrapped], { type: 'text/html;charset=utf-8' }) });
   }
   return out;
 }
@@ -835,7 +929,7 @@ async function fetchPage(item) {
 async function fetchBook(item) {
   const res = await fetch(item.url, { credentials: 'include' });
   const html = await res.text();
-  return [{ path: `books/${sanitizeFilename(item.name)}.html`, blob: new Blob([html], { type: 'text/html;charset=utf-8' }) }];
+  return [{ path: `${sanitizeFilename(item.name)}.html`, blob: new Blob([html], { type: 'text/html;charset=utf-8' }) }];
 }
 
 // ========== ICS calendar ==========
