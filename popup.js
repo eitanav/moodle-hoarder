@@ -71,6 +71,87 @@ function showView(name) {
   if (zoomView) zoomView.style.display = name === 'zoom' ? 'block' : 'none';
 }
 
+// Settings button opens the options page in a new tab.
+document.getElementById('openSettings')?.addEventListener('click', () => {
+  if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
+  else chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+});
+
+// Bootstrap: load settings into the cache before anything else runs.
+(async () => {
+  await loadCachedSettings();
+  await refreshQueueArea();
+})();
+
+// ========== Right-click queue ==========
+const QUEUE_KEY = 'rightClickQueue';
+
+async function getQueue() {
+  const s = await chrome.storage.local.get(QUEUE_KEY);
+  return s[QUEUE_KEY] || [];
+}
+async function setQueue(q) {
+  await chrome.storage.local.set({ [QUEUE_KEY]: q });
+  try { chrome.runtime.sendMessage({ type: 'refreshBadge' }); } catch {}
+}
+async function refreshQueueArea() {
+  const q = await getQueue();
+  const area = document.getElementById('queueArea');
+  if (!area) return;
+  if (q.length === 0) { area.style.display = 'none'; return; }
+  area.style.display = 'block';
+  document.getElementById('queueCountText').textContent = `${q.length} פריטים בתור`;
+}
+
+document.getElementById('clearQueue')?.addEventListener('click', async () => {
+  if (!confirm('לרוקן את התור?')) return;
+  await setQueue([]);
+  await refreshQueueArea();
+});
+
+document.getElementById('downloadQueue')?.addEventListener('click', async () => {
+  const q = await getQueue();
+  if (!q.length) return;
+  document.getElementById('downloadQueue').disabled = true;
+  setStatus(`מוריד ${q.length} פריטים בתור...`);
+  setProgress(0, q.length);
+  const files = [];
+  const used = new Set();
+  let done = 0;
+  for (const entry of q) {
+    done++;
+    setStatus(`(${done}/${q.length}) ${entry.linkText || entry.url}`);
+    setProgress(done, q.length);
+    try {
+      const res = await fetch(entry.url, { credentials: 'include' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      let name = filenameFromResponse(res) || decodeURIComponent(entry.url.split('/').pop().split('?')[0]) || 'file';
+      name = sanitizeFilename(name) || 'file';
+      const path = uniquePath(used, name);
+      files.push({ path, blob });
+      logLine(`✓ ${path} (${formatSize(blob.size)})`, 'ok');
+    } catch (e) {
+      logLine(`✗ ${entry.url}: ${e.message}`, 'err');
+    }
+  }
+  if (!files.length) {
+    setStatus('כשל בהורדת התור.');
+    document.getElementById('downloadQueue').disabled = false;
+    return;
+  }
+  setStatus('מארז ZIP...');
+  const zipBlob = await buildZip(files);
+  const url = URL.createObjectURL(zipBlob);
+  const filename = `moodle-hoarder-queue-${new Date().toISOString().slice(0, 10)}.zip`;
+  await chrome.downloads.download({ url, filename, saveAs: !!CACHED_SETTINGS?.saveAs });
+  await setQueue([]);
+  await refreshQueueArea();
+  setStatus(`הושלם: ${files.length} פריטים, ${formatSize(zipBlob.size)}.`);
+  notify('Moodle Hoarder', `הורדו ${files.length} פריטים מהתור`);
+  document.getElementById('downloadQueue').disabled = false;
+});
+
 // ---------- Initial: scan button ----------
 $('scan').addEventListener('click', async () => {
   $('scan').disabled = true;
@@ -147,6 +228,56 @@ function extractCourse(doc) {
   let idx = 0;
   const seen = new Set();
 
+  // Pull clean visible text from an element while stripping Moodle's UI
+  // controls. textContent of a section header would otherwise include the
+  // collapse/expand buttons ("צמצום"/"הרחבה"), the section-picker label
+  // ("בחירת יחידת הוראה"), and the screen-reader-only span — turning
+  // "שיעור 5" into a long mess.
+  const cleanText = (el) => {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll(
+      'button, select, input, [role="button"], [role="menu"], [role="menuitem"],' +
+      ' .accesshide, .visually-hidden, .sr-only, [aria-hidden="true"],' +
+      ' .dropdown, .dropdown-menu, .actions, .editing_section, .section-actions,' +
+      ' .activity-actions, .activity-action-menu, .menu-action, .icon'
+    ).forEach(n => n.remove());
+    return clone.textContent.replace(/[‎‏‪-‮]/g, '').replace(/\s+/g, ' ').trim();
+  };
+
+  const getSectionTitle = (sec) => {
+    const candidates = [
+      '[data-region="section-title"] [data-action="edit"]',
+      '[data-region="section-title"] a',
+      '[data-region="section-title"]',
+      '.section-title-content .inplaceeditable',
+      '.section-title-content',
+      '.section-title',
+      '.sectiontitle',
+      'h3.sectionname > a',
+      'h3.sectionname',
+      '.sectionname',
+      'h3',
+    ];
+    for (const sel of candidates) {
+      const el = sec.querySelector(sel);
+      if (!el) continue;
+      const text = cleanText(el);
+      if (text && text.length < 200) return text;
+    }
+    return '';
+  };
+
+  const getActivityName = (a) => {
+    for (const sel of ['.instancename', '.activityname', '.activitytitle', '.aalink']) {
+      const el = a.querySelector(sel);
+      if (!el) continue;
+      const text = cleanText(el);
+      if (text) return text;
+    }
+    return cleanText(a);
+  };
+
   const collect = (root, sectionName) => {
     const items = [];
     for (const a of root.querySelectorAll('a[href]')) {
@@ -155,23 +286,14 @@ function extractCourse(doc) {
       const key = m[1] + ':' + m[2];
       if (seen.has(key)) continue;
       seen.add(key);
-      const nameEl = a.querySelector('.instancename');
-      let name = '';
-      if (nameEl) {
-        const c = nameEl.cloneNode(true);
-        c.querySelectorAll('.accesshide').forEach(n => n.remove());
-        name = c.textContent.trim();
-      } else {
-        name = (a.textContent || '').trim();
-      }
-      items.push({ idx: idx++, type: m[1], id: m[2], url: a.href, name: name || `${m[1]}_${m[2]}`, section: sectionName });
+      const name = getActivityName(a) || `${m[1]}_${m[2]}`;
+      items.push({ idx: idx++, type: m[1], id: m[2], url: a.href, name, section: sectionName });
     }
     return items;
   };
 
   for (const sec of secEls) {
-    const nameEl = sec.querySelector('.sectionname, h3.sectionname, .course-section-header, h3');
-    const sName = (nameEl?.textContent || '').trim() || `קטע ${sections.length + 1}`;
+    const sName = getSectionTitle(sec) || `קטע ${sections.length + 1}`;
     const items = collect(sec, sName);
     if (items.length) {
       const sIdx = sections.length;
@@ -181,7 +303,6 @@ function extractCourse(doc) {
   }
 
   if (!sections.length) {
-    // Fallback: no section structure detected → one bucket
     const all = collect(doc.body || doc, 'כללי');
     if (all.length) {
       for (const it of all) it.sectionIdx = 0;
@@ -235,8 +356,8 @@ function renderPicker() {
     const ul = secDiv.querySelector('.section-items');
 
     sec.items.forEach(item => {
-      const isNew = !isPreviouslySeen(scanned.prevSeen, item);
       const defChecked = defaultChecked(item, sIdx);
+      const status = diffStatus(scanned.prevSeen, item, defChecked);
       const li = document.createElement('li');
       li.dataset.idx = item.idx;
       li.innerHTML = `
@@ -246,10 +367,10 @@ function renderPicker() {
       li.querySelector('.name').textContent = item.name;
       const chip = li.querySelector('.chip');
       chip.textContent = item.type;
-      if (isNew && scanned.prevSeen) {
+      if (status && scanned.prevSeen) {
         const n = document.createElement('span');
         n.className = 'chip new';
-        n.textContent = 'חדש';
+        n.textContent = status;
         chip.after(n);
       }
       li.querySelector('input').addEventListener('change', () => {
@@ -278,20 +399,42 @@ function renderPicker() {
 
   totCountEl.textContent = total;
 
-  // Diff banner if we have prior data
-  if (scanned.prevSeen && scanned.prevSeen.items?.length) {
-    const newCount = countNew();
-    diffText.textContent = `נמצאה הורדה קודמת מתאריך ${formatDateShort(scanned.prevSeen.lastDownload)} — ${newCount} פריטים חדשים מאז.`;
-    diffBanner.classList.add('show');
-  } else {
-    diffBanner.classList.remove('show');
-  }
+  // Banner priority: prior incomplete download (checkpoint) > diff banner
+  (async () => {
+    const ckpt = scanned.courseId ? await loadCheckpoint(scanned.courseId) : null;
+    if (ckpt && Object.keys(ckpt.results || {}).length) {
+      const cachedCount = Object.keys(ckpt.results).length;
+      diffText.textContent = `נמצאה הורדה לא-גמורה מ-${formatDateShort(ckpt.startedAt)} (${cachedCount} פריטים כבר ירדו). הם יישמרו וההורדה תמשיך משם.`;
+      diffBanner.classList.add('show');
+      return;
+    }
+    if (scanned.prevSeen && scanned.prevSeen.items?.length) {
+      const newCount = countNew();
+      diffText.textContent = `נמצאה הורדה קודמת מתאריך ${formatDateShort(scanned.prevSeen.lastDownload)} — ${newCount} פריטים חדשים מאז.`;
+      diffBanner.classList.add('show');
+    } else {
+      diffBanner.classList.remove('show');
+    }
+  })();
 
   updateSelCount();
   setStatus('');
 }
 
+// Cached settings — loaded once at popup boot. The settings page writes
+// chrome.storage and we re-read; the popup only lives for short bursts so
+// keeping a snapshot in memory is fine.
+let CACHED_SETTINGS = null;
+async function loadCachedSettings() {
+  CACHED_SETTINGS = await getSettings();
+  return CACHED_SETTINGS;
+}
+
 function defaultChecked(item, sectionIdx) {
+  // Settings file-type filter wins: if user disabled this type in options,
+  // it is unchecked by default.
+  const ft = CACHED_SETTINGS?.fileTypes;
+  if (ft && ft[item.type] === false) return false;
   if (ALWAYS_OFF_TYPES.has(item.type)) return false;
   if (sectionIdx === 0 && INTRO_OFF_TYPES.has(item.type)) return false;
   return true;
@@ -302,10 +445,24 @@ function isPreviouslySeen(prev, item) {
   return prev.items.some(p => p.type === item.type && p.id === item.id);
 }
 
+// Returns a chip label string for the diff status, or '' if no label needed.
+// - 'חדש'        — item didn't exist in the previous download
+// - 'לא בדיפולט' — was skipped last time because it's a default-off type
+//                  (so it's not really "new", just non-default)
+// - ''           — item is unchanged
+// (Size-based "עודכן" will appear once we have per-item sizes — TODO.)
+function diffStatus(prev, item, defChecked) {
+  if (!prev || !prev.items?.length) return '';
+  const seen = prev.items.find(p => p.type === item.type && p.id === item.id);
+  if (seen) return '';
+  // Not seen before — either truly new, or simply not part of the default selection.
+  return defChecked ? 'חדש' : 'לא בדיפולט';
+}
+
 function countNew() {
   let n = 0;
-  scanned.sections.forEach(sec => sec.items.forEach(it => {
-    if (!isPreviouslySeen(scanned.prevSeen, it)) n++;
+  scanned.sections.forEach((sec, sIdx) => sec.items.forEach(it => {
+    if (diffStatus(scanned.prevSeen, it, defaultChecked(it, sIdx)) === 'חדש') n++;
   }));
   return n;
 }
@@ -580,25 +737,49 @@ const CONCURRENT_DOWNLOADS = 5;
 
 // Fetch every item in parallel with a concurrency cap. Results array stays in
 // original order so the ZIP and log don't reshuffle.
-async function fetchItemsParallel(items, concurrency, onProgress) {
+//
+// If `checkpoint` is provided, completed items are persisted to chrome.storage
+// after each finish — so a popup closing mid-download doesn't lose all progress.
+// Completed items are SKIPPED on re-entry: the cached fetch result is restored
+// into the results array and re-used.
+async function fetchItemsParallel(items, concurrency, onProgress, checkpoint = null) {
   const results = new Array(items.length);
   const errors = [];
   let nextIdx = 0;
   let completed = 0;
+
+  // Load prior progress so previously-fetched items don't have to be re-fetched.
+  let cached = null;
+  if (checkpoint) cached = await loadCheckpoint(checkpoint);
 
   async function worker() {
     while (true) {
       const i = nextIdx++;
       if (i >= items.length) return;
       const item = items[i];
+      const cachedEntry = cached?.results?.[itemKey(item)];
+      if (cachedEntry) {
+        // Reconstruct Blobs from base64 (chrome.storage can't hold Blob refs)
+        try {
+          results[i] = cachedEntry.map(r => {
+            if (r.kind || !r.dataB64) return r; // links/events have no blob
+            return { ...r, blob: blobFromBase64(r.dataB64, r.mime), dataB64: undefined };
+          });
+        } catch { results[i] = null; }
+        completed++;
+        onProgress?.(completed, items.length, item, true /* fromCache */);
+        continue;
+      }
       try {
-        results[i] = await fetchItem(item);
+        const got = await fetchItem(item);
+        results[i] = got;
+        if (checkpoint) await persistItemToCheckpoint(checkpoint, item, got);
       } catch (e) {
         errors.push({ item, err: e.message || String(e) });
         results[i] = null;
       } finally {
         completed++;
-        onProgress?.(completed, items.length, item);
+        onProgress?.(completed, items.length, item, false);
       }
     }
   }
@@ -606,6 +787,49 @@ async function fetchItemsParallel(items, concurrency, onProgress) {
   const workerCount = Math.max(1, Math.min(concurrency, items.length));
   await Promise.all(Array.from({ length: workerCount }, worker));
   return { results, errors };
+}
+
+function itemKey(item) { return `${item.type}:${item.id}`; }
+
+// Checkpoint storage. Keys: ckpt_<courseId>. Value: { startedAt, results: { 'type:id': [{kind?, path?, dataB64?, mime?}] } }
+async function loadCheckpoint(courseId) {
+  if (!courseId) return null;
+  const key = `ckpt_${courseId}`;
+  return (await chrome.storage.local.get(key))[key] || null;
+}
+async function persistItemToCheckpoint(courseId, item, fetchResults) {
+  if (!courseId) return;
+  const key = `ckpt_${courseId}`;
+  const stored = (await chrome.storage.local.get(key))[key] || { startedAt: Date.now(), results: {} };
+  // Convert any Blob payloads to base64 so the value is serialisable.
+  const serial = await Promise.all((fetchResults || []).map(async r => {
+    if (r.kind || !r.blob) return r; // links/events/etc — keep as-is
+    const dataB64 = await blobToBase64(r.blob);
+    return { path: r.path, dataB64, mime: r.blob.type };
+  }));
+  stored.results[itemKey(item)] = serial;
+  await chrome.storage.local.set({ [key]: stored });
+}
+async function clearCheckpoint(courseId) {
+  if (!courseId) return;
+  await chrome.storage.local.remove(`ckpt_${courseId}`);
+}
+
+async function blobToBase64(blob) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  // chunk to avoid call-stack overflow on big files
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+function blobFromBase64(b64, mime = 'application/octet-stream') {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 // ========== Core download routine ==========
@@ -619,19 +843,22 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   const events = [];     // calendar deadlines
   const used = new Set();
 
-  // Phase 1: parallel fetch
+  // Phase 1: parallel fetch with checkpoint resume on courseId.
   setStatus(`מוריד ${items.length} פריטים במקביל (עד ${CONCURRENT_DOWNLOADS} בו-זמנית)...`);
   const { results, errors } = await fetchItemsParallel(items, CONCURRENT_DOWNLOADS,
-    (done, total, item) => {
-      setStatus(`(${done}/${total}) הושלם: ${item.name}`);
+    (done, total, item, fromCache) => {
+      const prefix = fromCache ? '↻' : '✓';
+      setStatus(`(${done}/${total}) ${prefix} ${item.name}`);
       setProgress(done, total);
-    });
+    },
+    courseId);
 
   if (!silent) {
     for (const { item, err } of errors) logLine(`✗ ${item.name}: ${err}`, 'err');
   }
 
   // Phase 2: assemble paths in original order (so the ZIP and log are stable)
+  const layout = CACHED_SETTINGS?.zipLayout || 'both';
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const got = results[i];
@@ -641,21 +868,26 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
       else if (r.kind === 'link') links.push(r);
       else if (r.kind === 'event') events.push(r.event);
       else {
-        // Each downloaded file goes into two places in the ZIP:
-        // 1) sections/<NN - section name>/<internal path>  — mirror of Moodle's section layout
-        // 2) "00 - כל הקבצים"/<filename>                   — single flat folder with everything
-        const sectionIdx = item.sectionIdx ?? 0;
-        const sectionNum = String(sectionIdx + 1).padStart(2, '0');
-        const sectionName = sanitizeFilename(item.section || 'כללי') || 'כללי';
-        const sectionPath = uniquePath(used, `${sectionNum} - ${sectionName}/${r.path}`);
-        files.push({ path: sectionPath, blob: r.blob });
-        if (!silent) logLine(`✓ ${sectionPath} (${formatSize(r.blob.size)})`, 'ok');
-
-        const filename = r.path.split('/').pop();
-        const isSubmission = r.path.includes('/_הגשות שלי/');
-        const flatRel = isSubmission ? `_הגשות שלי/${filename}` : filename;
-        const flatPath = uniquePath(used, `00 - כל הקבצים/${flatRel}`);
-        files.push({ path: flatPath, blob: r.blob });
+        // Each downloaded file can go into two places in the ZIP, controlled by settings.zipLayout:
+        //   'sections' = only the numbered section folder
+        //   'flat'     = only the single "00 - כל הקבצים" folder
+        //   'both'     = both views (default; ZIP about 2x larger)
+        if (layout === 'sections' || layout === 'both') {
+          const sectionIdx = item.sectionIdx ?? 0;
+          const sectionNum = String(sectionIdx + 1).padStart(2, '0');
+          const sectionName = sanitizeFilename(item.section || 'כללי') || 'כללי';
+          const sectionPath = uniquePath(used, `${sectionNum} - ${sectionName}/${r.path}`);
+          files.push({ path: sectionPath, blob: r.blob });
+          if (!silent) logLine(`✓ ${sectionPath} (${formatSize(r.blob.size)})`, 'ok');
+        }
+        if (layout === 'flat' || layout === 'both') {
+          const filename = r.path.split('/').pop();
+          const isSubmission = r.path.includes('/_הגשות שלי/');
+          const flatRel = isSubmission ? `_הגשות שלי/${filename}` : filename;
+          const flatPath = uniquePath(used, `00 - כל הקבצים/${flatRel}`);
+          files.push({ path: flatPath, blob: r.blob });
+          if (!silent && layout === 'flat') logLine(`✓ ${flatPath} (${formatSize(r.blob.size)})`, 'ok');
+        }
       }
     }
   }
@@ -670,6 +902,16 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   if (events.length) {
     files.push({ path: 'deadlines.ics', blob: textBlob(buildICS(events, courseName), 'text/calendar;charset=utf-8') });
   }
+
+  // Optional: grades export
+  if (courseId && CACHED_SETTINGS?.includeGrades) {
+    try {
+      const csv = await fetchGradesCsv(courseId);
+      if (csv) files.push({ path: 'ציונים.csv', blob: textBlob(csv, 'text/csv;charset=utf-8') });
+    } catch (e) {
+      if (!silent) logLine(`✗ שליפת ציונים: ${e.message}`, 'err');
+    }
+  }
   const info = buildInfo({ courseName, courseUrl, items, files, links, recordings, events, errors });
   files.push({ path: 'info.txt', blob: textBlob(info) });
 
@@ -678,11 +920,17 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
 
   const zipBlob = await buildZip(files);
   const blobUrl = URL.createObjectURL(zipBlob);
-  const filename = sanitizeFilename(courseName) + '.zip';
-  await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
+  const baseName = sanitizeFilename(courseName) + '.zip';
+  const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const filename = subfolder ? `${subfolder}/${baseName}` : baseName;
+  await chrome.downloads.download({ url: blobUrl, filename, saveAs: !!CACHED_SETTINGS?.saveAs });
 
-  // Persist "seen" snapshot
-  if (courseId) await saveSeen(courseId, items);
+  // Persist "seen" snapshot (include courseName for the history dashboard).
+  if (courseId) {
+    await saveSeen(courseId, items, { courseName, courseUrl });
+    // Successful run — clear the checkpoint so the next download starts fresh.
+    await clearCheckpoint(courseId);
+  }
 
   setStatus(`הושלם: ${files.length} פריטים, ${formatSize(zipBlob.size)}.`);
   if (!silent) notify('Moodle Hoarder', `הורדו ${files.length} פריטים מ-"${courseName}"`);
@@ -741,10 +989,21 @@ async function loadSeen(courseId) {
   const obj = await chrome.storage.local.get(key);
   return obj[key] || null;
 }
-async function saveSeen(courseId, items) {
+async function saveSeen(courseId, items, meta = {}) {
   const key = `seen_${courseId}`;
+  const prev = (await chrome.storage.local.get(key))[key] || {};
   await chrome.storage.local.set({
-    [key]: { lastDownload: Date.now(), items: items.map(i => ({ type: i.type, id: i.id })) }
+    [key]: {
+      ...prev,
+      lastDownload: Date.now(),
+      // Track size+url so diff mode can detect "updated" files (same item, different size).
+      items: items.map(i => ({
+        type: i.type, id: i.id, name: i.name,
+        size: i._lastSize ?? prev.items?.find(p => p.type === i.type && p.id === i.id)?.size,
+      })),
+      courseName: meta.courseName || prev.courseName,
+      courseUrl: meta.courseUrl || prev.courseUrl,
+    },
   });
 }
 function formatDateShort(ts) {
@@ -1085,7 +1344,21 @@ function extFromUrl(u) {
   return m ? '.' + m[1].toLowerCase() : '';
 }
 function sanitizeFilename(name) {
-  return (name || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150);
+  if (!name) return '';
+  return String(name)
+    // strip Unicode bidi marks and zero-width spaces (cause invisible chars in paths)
+    .replace(/[​-‏‪-‮⁦-⁩﻿]/g, '')
+    // replace forbidden path chars (Windows + POSIX) with _
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    // collapse runs of whitespace
+    .replace(/\s+/g, ' ')
+    // collapse runs of underscores (was producing "_ _ _ _ _" strings)
+    .replace(/[_\s]*_[_\s]*/g, '_')
+    .replace(/^_+|_+$/g, '')
+    // Windows doesn't allow trailing dot or space in folder/file names
+    .replace(/[. ]+$/, '')
+    .trim()
+    .slice(0, 120);
 }
 function uniquePath(used, path) {
   if (!used.has(path)) { used.add(path); return path; }
@@ -1851,4 +2124,52 @@ async function waitForListPage(tabId, timeoutMs = 6000) {
     await new Promise(r => setTimeout(r, 400));
   }
   return false;
+}
+
+// ===== Grades export =====
+// Scrapes Moodle's Grader Report (User View) for the course and returns CSV.
+// Hebrew Moodle uses "/grade/report/user/index.php?id=<courseId>" by default;
+// some courses redirect to /grade/report/index.php. We try the user-view first.
+async function fetchGradesCsv(courseId) {
+  const base = 'https://moodlearn.ariel.ac.il';
+  const urls = [
+    `${base}/grade/report/user/index.php?id=${courseId}`,
+    `${base}/grade/report/overview/index.php?id=${courseId}`,
+    `${base}/grade/report/index.php?id=${courseId}`,
+  ];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const rows = parseGradesTable(doc);
+      if (rows.length) return rowsToCsv(rows);
+    } catch {}
+  }
+  return null;
+}
+
+function parseGradesTable(doc) {
+  // Look for any table that has "Grade item" / "פריט ציון" / "ציון" semantics.
+  const tables = doc.querySelectorAll('table.user-grade, table.gradereport-user, table.boxaligncenter, #user-grade');
+  for (const t of tables.length ? tables : doc.querySelectorAll('table')) {
+    const rows = [...t.querySelectorAll('tr')];
+    if (rows.length < 2) continue;
+    const parsed = rows.map(tr => {
+      return [...tr.querySelectorAll('th, td')].map(c => (c.textContent || '').trim().replace(/\s+/g, ' '));
+    }).filter(r => r.some(c => c));
+    // Heuristic: must have a header row with at least 2 columns and "ציון"/"Grade"
+    const hdr = parsed[0]?.join(' ').toLowerCase() || '';
+    if (parsed[0]?.length >= 2 && (/ציון|grade|item/i.test(hdr))) return parsed;
+  }
+  return [];
+}
+
+function rowsToCsv(rows) {
+  const esc = (s) => {
+    s = String(s ?? '');
+    return /[,"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
 }

@@ -217,16 +217,23 @@
 <body>
 <header>
   <img src="icons/icon-48.png" alt="">
-  <div>
+  <div style="flex:1;">
     <h1>Moodle Hoarder</h1>
     <div class="sub">אוסף לך הכל מהמודל לתיק אחד</div>
   </div>
+  <button id="openSettings" title="הגדרות" style="background:transparent;border:none;color:white;cursor:pointer;font-size:18px;padding:6px;width:auto;">⚙</button>
 </header>
 
 <main>
   <div id="initial">
     <button id="scan">סרוק</button>
     <div class="hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+    <div id="queueArea" style="display:none; margin-top:10px;">
+      <button id="downloadQueue" style="background: var(--row); color: var(--fg); border: 1px solid var(--border);">
+        <span id="queueCountText">0 פריטים בתור</span> · הורד הכל כ-ZIP
+      </button>
+      <a id="clearQueue" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
+    </div>
   </div>
 
   <div id="picker" style="display:none;">
@@ -291,6 +298,7 @@
   <div id="log"></div>
 </main>
 
+<script src="settings.js"></script>
 <script src="zip.js"></script>
 <script src="popup.js"></script>
 </body>
