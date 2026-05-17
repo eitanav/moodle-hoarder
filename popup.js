@@ -79,13 +79,19 @@ $('scan').addEventListener('click', async () => {
     if (/zoom\.us/.test(tab.url)) {
       setStatus('ממתין שדף ה-Zoom ייטען...');
       const data = await scrapeAllZoomPages(tab.id, (s) => setStatus(s));
-      await saveZoomFile(data);
       if (data.recordings.length === 0) {
+        await saveZoomFile(data);
         setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד לפרטים.');
-      } else {
-        setStatus(`הושלם: ${data.recordings.length} הקלטות מ-${data.pages} עמודים.`);
-        notify('Moodle Hoarder', `נמצאו ${data.recordings.length} הקלטות Zoom`);
+        $('scan').disabled = false;
+        return;
       }
+      // Step 2: open each recording's detail page and extract its URLs.
+      setStatus(`נמצאו ${data.recordings.length} הקלטות. מתחיל פענוח קישורים — אל תסגור!`);
+      await resolveZoomPlayUrls(tab.id, data.recordings, (s) => setStatus(s));
+      await saveZoomFile(data);
+      const ok = data.recordings.filter(r => r.shareUrls?.length).length;
+      setStatus(`הושלם: ${ok}/${data.recordings.length} קישורים נמצאו, מ-${data.pages} עמודים.`);
+      notify('Moodle Hoarder', `Zoom: ${ok}/${data.recordings.length} קישורים נחלצו`);
       $('scan').disabled = false;
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
@@ -1109,18 +1115,34 @@ async function saveZoomFile(data) {
       if (r.date)      lines.push(`    Date:       ${r.date}`);
       if (r.duration)  lines.push(`    Duration:   ${r.duration}`);
       if (r.page && data.pages > 1) lines.push(`    Page:       ${r.page}`);
-      if (r.rawCells && r.rawCells.length) {
+      if (r.shareUrls && r.shareUrls.length) {
+        if (r.shareUrls.length === 1) {
+          lines.push(`    URL:        ${r.shareUrls[0]}`);
+        } else {
+          lines.push(`    URLs:`);
+          for (const u of r.shareUrls) lines.push(`        ${u}`);
+        }
+      }
+      if (r.error) lines.push(`    ⚠ Error:    ${r.error}`);
+      if (r.rawCells && r.rawCells.length && !r.shareUrls?.length) {
         lines.push(`    Raw:        ${r.rawCells.join(' | ')}`);
       }
     }
     lines.push('');
     lines.push('=========================================================');
     lines.push('');
-    lines.push('הערה: באיטרציה הזו הקובץ מכיל רק מטא-דאטה (שם, תאריך, ID).');
-    lines.push('כדי לצפות בכל הקלטה — פתח את הדף ב-Zoom ולחץ על השורה המתאימה.');
-    lines.push('');
-    lines.push('באיטרציה הבאה (3): התוסף יפתח כל הקלטה ויחלץ play-URL עם טוקן');
-    lines.push('JWT שעובד מכל מכשיר ללא צורך בלוגין מחדש.');
+    const withUrls = data.recordings.filter(r => r.shareUrls?.length).length;
+    if (withUrls > 0) {
+      lines.push(`נמצאו קישורים ל-${withUrls} מתוך ${data.recordings.length} הקלטות.`);
+      lines.push('');
+      lines.push('הקישורים הם share-URLs — לחיצה תפתח דף שעושה אימות ומפנה');
+      lines.push('ל-play-URL עם טוקן ה-tk. אם רוצים URL שעובד מכל מכשיר ללא');
+      lines.push('לוגין, פתחו את הקישור, חכו שהנגן ייטען, והעתיקו את הכתובת');
+      lines.push('מסרגל הכתובות אז.');
+    } else {
+      lines.push('לא נמצאו קישורים בדפי ה-detail.');
+      lines.push('שלח HTML של דף detail אחד (אחרי קליק על הקלטה) להמשך טיפול.');
+    }
   }
 
   const date = new Date().toISOString().slice(0, 10);
@@ -1233,4 +1255,235 @@ async function clickZoomNextPage(tabId) {
     clickedAny = results.some(r => r?.result?.clicked);
   } catch {}
   return clickedAny;
+}
+
+// Same as clickZoomNextPage but for Previous.
+async function clickZoomPrevPage(tabId) {
+  let clickedAny = false;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const isDisabled = (el) => {
+          if (!el) return true;
+          if (el.disabled) return true;
+          if (el.getAttribute('aria-disabled') === 'true') return true;
+          const cls = (el.className || '').toString();
+          if (/\b(is-)?disabled\b/i.test(cls)) return true;
+          const parent = el.closest('[aria-disabled="true"], .disabled, .is-disabled');
+          if (parent && parent !== document.body) return true;
+          return false;
+        };
+        const selectors = [
+          'button[aria-label*="Previous page" i]',
+          'button[aria-label*="previous" i]',
+          'a[aria-label*="previous" i]',
+          '.zm-pagination__prev',
+          '[class*="pagination"] [class*="prev"]:not([class*="disabled"])',
+          'li.prev:not(.disabled) a',
+          'li.prev:not(.disabled) button',
+          '.pagination-prev',
+          '[data-testid*="prev" i]',
+        ];
+        for (const sel of selectors) {
+          for (const el of document.querySelectorAll(sel)) {
+            if (isDisabled(el)) continue;
+            el.click();
+            return true;
+          }
+        }
+        const texts = ['previous', 'prev', 'הקודם', '‹', '«', '<'];
+        for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+          if (isDisabled(el)) continue;
+          const t = (el.textContent || '').trim().toLowerCase();
+          if (texts.includes(t)) { el.click(); return true; }
+        }
+        return false;
+      },
+    });
+    clickedAny = results.some(r => r?.result);
+  } catch {}
+  return clickedAny;
+}
+
+// ===== URL resolution (iteration 5) =====
+// For each recording (in display order across pages), simulate a click on its
+// table row, wait for the detail page to render, collect every /rec/share|play|download
+// URL we can find, then navigate back. Processes from last page backwards so we
+// don't need to find a "go to first page" button.
+async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
+  for (const rec of recordings) {
+    rec.shareUrls = [];
+    rec.detailUrl = '';
+    rec.error = null;
+  }
+
+  const totalPages = Math.max(1, ...recordings.map(r => r.page || 1));
+  let recDone = 0;
+
+  for (let p = totalPages; p >= 1; p--) {
+    const onPage = recordings.filter(r => (r.page || 1) === p);
+    if (!onPage.length) continue;
+    // Make sure list is rendered on this page before clicking
+    await waitForZoomList(tabId);
+
+    for (let i = 0; i < onPage.length; i++) {
+      const rec = onPage[i];
+      recDone++;
+      const short = (rec.date || '').slice(0, 12);
+      onProgress?.(`(${recDone}/${recordings.length}) [עמוד ${p}] ${rec.topic} — ${short}`);
+
+      const clicked = await clickRecordingRow(tabId, i);
+      if (!clicked) { rec.error = 'click failed'; continue; }
+
+      const detail = await waitForDetailPage(tabId, 8000);
+      rec.detailUrl = detail.url;
+      rec.shareUrls = detail.urls;
+      if (!detail.urls.length) rec.error = 'detail did not expose URL';
+
+      await navigateBackInZoom(tabId);
+      const ok = await waitForListPage(tabId, 6000);
+      if (!ok) rec.error = (rec.error ? rec.error + '; ' : '') + 'list did not restore';
+    }
+
+    if (p > 1) {
+      onProgress?.(`חוזר לעמוד ${p - 1}...`);
+      const prev = await clickZoomPrevPage(tabId);
+      if (!prev) { onProgress?.(`לא נמצא כפתור Previous — עוצר.`); break; }
+      await new Promise(r => setTimeout(r, 800));
+    }
+  }
+}
+
+// Click the i'th row in the table that contains zoom meeting IDs.
+async function clickRecordingRow(tabId, rowIdx) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      args: [rowIdx],
+      func: (idx) => {
+        const ZOOM_ID_RE = /\b\d{3,4}\s+\d{3,4}\s+\d{3,4}\b/;
+        let target = null;
+        for (const table of document.querySelectorAll('table')) {
+          for (const row of table.querySelectorAll('tbody tr')) {
+            if (ZOOM_ID_RE.test(row.textContent || '')) { target = table; break; }
+          }
+          if (target) break;
+        }
+        if (!target) return false;
+        const rows = target.querySelectorAll('tbody tr');
+        const row = rows[idx];
+        if (!row) return false;
+        // Prefer the topic link / explicit button
+        const link = row.querySelector('a[href]:not([href="#"]):not([href^="javascript"])');
+        if (link) { link.click(); return true; }
+        const btn = row.querySelector('button:not([disabled]), [role="button"]');
+        if (btn) { btn.click(); return true; }
+        // React onClick on the row itself
+        row.click();
+        return true;
+      },
+    });
+    return results.some(r => r?.result === true);
+  } catch { return false; }
+}
+
+// Poll until any zoom recording URL appears on the page, or timeout.
+async function waitForDetailPage(tabId, timeoutMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => {
+          const REC_RE = /https?:\/\/[^\s"'<>]*zoom\.us\/rec\/(?:share|play|download)\/[^\s"'<>?#]+(?:\?[^\s"'<>#]*)?/g;
+          const found = new Set();
+          // Anchors
+          for (const a of document.querySelectorAll('a[href]')) {
+            if (/zoom\.us\/rec\/(?:share|play|download)/.test(a.href)) found.add(a.href);
+          }
+          // Inputs / textareas (Zoom often shows the URL in a copyable input)
+          for (const el of document.querySelectorAll('input, textarea')) {
+            const v = (el.value ?? '').toString();
+            const ms = v.match(REC_RE);
+            if (ms) ms.forEach(u => found.add(u));
+          }
+          // Visible body text (some pages render the URL as text)
+          const txt = (document.body && document.body.innerText) || '';
+          const tm = txt.match(REC_RE);
+          if (tm) tm.forEach(u => found.add(u));
+          // data-* attributes
+          for (const el of document.querySelectorAll('[data-url], [data-share-url], [data-play-url], [data-recording-url]')) {
+            for (const name of ['data-url','data-share-url','data-play-url','data-recording-url']) {
+              const v = el.getAttribute(name) || '';
+              const ms = v.match(REC_RE);
+              if (ms) ms.forEach(u => found.add(u));
+            }
+          }
+          return { url: location.href, urls: [...found] };
+        },
+      });
+      const all = new Set();
+      let url = '';
+      for (const r of results) {
+        if (!r?.result) continue;
+        if (r.result.url && !url) url = r.result.url;
+        for (const u of r.result.urls) all.add(u);
+      }
+      if (all.size > 0) return { url, urls: [...all] };
+    } catch {}
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return { url: '', urls: [] };
+}
+
+// Navigate back from detail to list: try a back/breadcrumb button, fall back to history.back().
+async function navigateBackInZoom(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const sel = [
+          '[aria-label*="back" i]',
+          'button[class*="back" i]',
+          '[class*="back-button" i]',
+          '[class*="breadcrumb"] a:first-child',
+          '[class*="breadcrumb"] [class*="link"]:first-child',
+        ];
+        for (const s of sel) {
+          const el = document.querySelector(s);
+          if (el && el.offsetParent !== null) { el.click(); return; }
+        }
+        history.back();
+      },
+    });
+  } catch {}
+  await new Promise(r => setTimeout(r, 600));
+}
+
+// Wait until the recordings table reappears with rows.
+async function waitForListPage(tabId, timeoutMs = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => {
+          const ZOOM_ID_RE = /\b\d{3,4}\s+\d{3,4}\s+\d{3,4}\b/;
+          for (const table of document.querySelectorAll('table')) {
+            for (const row of table.querySelectorAll('tbody tr')) {
+              if (ZOOM_ID_RE.test(row.textContent || '')) return true;
+            }
+          }
+          return false;
+        },
+      });
+      if (results.some(r => r?.result === true)) {
+        await new Promise(r => setTimeout(r, 300));
+        return true;
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return false;
 }
