@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --row: #f9fafb;
+    --row-hover: #f3f4f6;
+    --accent: #dc2867;
+    --accent-2: #ff8c3c;
+    --ok: #1b5e20;
+    --err: #b00020;
+    --chip-bg: #fde8ef;
+    --chip-fg: #9a1247;
+    --new-bg: #fff3cd;
+    --new-fg: #7a4e00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f3f4f6;
+      --muted: #9ca3af;
+      --border: #374151;
+      --row: #262626;
+      --row-hover: #333;
+      --chip-bg: #4a1530;
+      --chip-fg: #ff9bbf;
+      --new-bg: #4a3a00;
+      --new-fg: #ffd966;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    width: 420px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  header {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header img { width: 28px; height: 28px; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .sub { font-size: 11px; opacity: .9; margin-top: 2px; }
+  main { padding: 12px 14px; }
+
+  button {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+    transition: transform .05s, opacity .15s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  button.tiny {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .row-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .row-btns button { width: auto; flex: 1; }
+
+  #status { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; }
+
+  .progress-wrap {
+    margin-top: 8px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    width: 0%;
+    transition: width .2s;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toolbar input[type=search] {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .toolbar a {
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .toolbar a:hover { text-decoration: underline; }
+
+  .banner {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: var(--new-bg);
+    color: var(--new-fg);
+    border-radius: 6px;
+    font-size: 12px;
+    display: none;
+  }
+  .banner.show { display: block; }
+  .banner .actions { margin-top: 6px; display: flex; gap: 6px; }
+
+  .summary { font-size: 11px; color: var(--muted); margin: 6px 0; }
+  .summary .count { color: var(--accent); font-weight: 600; }
+
+  .sections {
+    margin-top: 4px;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .section { border-bottom: 1px solid var(--border); }
+  .section:last-child { border-bottom: none; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--row-hover);
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .section-header .sec-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-header .sec-count { font-size: 10px; color: var(--muted); font-weight: 400; }
+  .section-header .caret { transition: transform .15s; }
+  .section.collapsed .caret { transform: rotate(-90deg); }
+  .section.collapsed .section-items { display: none; }
+
+  .section-items { list-style: none; margin: 0; padding: 0; }
+  .section-items li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 26px;
+    font-size: 12px;
+    background: var(--row);
+  }
+  .section-items li:hover { background: var(--row-hover); }
+  .section-items li.hidden { display: none; }
+  .section-items input[type=checkbox] { margin: 0; cursor: pointer; }
+  .section-items .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-items .chip {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .section-items .chip.new { background: var(--new-bg); color: var(--new-fg); }
+
+  ul.courses { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  ul.courses li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid var(--border); background: var(--row); }
+  ul.courses li:last-child { border-bottom: none; }
+  ul.courses li:hover { background: var(--row-hover); }
+  ul.courses .name { flex: 1; }
+  ul.courses .id { font-size: 10px; color: var(--muted); }
+
+  #log {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    max-height: 120px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    display: none;
+    font-family: 'Consolas', monospace;
+  }
+  #log.show { display: block; }
+  #log .err { color: var(--err); }
+  #log .ok { color: var(--ok); }
+
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-48.png" alt="">
+  <div>
+    <h1>Moodle Hoarder</h1>
+    <div class="sub">אוסף לך הכל מהמודל לתיק אחד</div>
+  </div>
+</header>
+
+<main>
+  <div id="initial">
+    <button id="scan">סרוק</button>
+    <div class="hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+  </div>
+
+  <div id="picker" style="display:none;">
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="חיפוש...">
+      <a id="selAll">הכל</a>
+      <a id="selNone">ניקוי</a>
+      <a id="selDefaults">איפוס</a>
+    </div>
+    <div class="banner" id="diffBanner">
+      <div id="diffText"></div>
+      <div class="actions">
+        <button class="tiny" id="selOnlyNew">בחר רק חדשים</button>
+        <button class="tiny secondary" id="selAllInBanner">הכל</button>
+      </div>
+    </div>
+    <div class="summary"><span class="count" id="selCount">0</span> מתוך <span id="totCount">0</span> נבחרו</div>
+    <div class="sections" id="sections"></div>
+    <div class="row-btns">
+      <button class="secondary" id="back">חזור</button>
+      <button id="download">הורד ל-ZIP</button>
+    </div>
+  </div>
+
+  <div id="multiPicker" style="display:none;">
+    <div class="summary">נמצאו <span class="count" id="totCourses">0</span> קורסים בעמוד "הקורסים שלי".</div>
+    <div class="toolbar">
+      <input id="searchCourses" type="search" placeholder="חיפוש קורס...">
+      <a id="courseAll">הכל</a>
+      <a id="courseNone">ניקוי</a>
+    </div>
+    <ul class="courses" id="courses"></ul>
+    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+        <input type="checkbox" id="onlyNewMulti">
+        הורד רק קבצים חדשים בכל קורס
+      </label>
+    </div>
+    <div class="row-btns">
+      <button class="secondary" id="backMulti">חזור</button>
+      <button id="downloadMulti">הורד את כל הקורסים שנבחרו</button>
+    </div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div id="status"></div>
+  <div id="log"></div>
+</main>
+
+<script src="zip.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Moodle Hoarder",
+  "version": "1.2.0",
+  "description": "Hoards every file, folder, assignment, syllabus and recording link from Ariel Moodle courses into tidy ZIPs.",
+  "permissions": ["activeTab", "downloads", "scripting", "notifications", "storage", "contextMenus"],
+  "host_permissions": [
+    "https://moodlearn.ariel.ac.il/*",
+    "https://*.ariel.ac.il/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Moodle Hoarder",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
