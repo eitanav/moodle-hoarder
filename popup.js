@@ -759,16 +759,21 @@ async function fetchItemsParallel(items, concurrency, onProgress, checkpoint = n
       const item = items[i];
       const cachedEntry = cached?.results?.[itemKey(item)];
       if (cachedEntry) {
-        // Reconstruct Blobs from base64 (chrome.storage can't hold Blob refs)
-        try {
-          results[i] = cachedEntry.map(r => {
-            if (r.kind || !r.dataB64) return r; // links/events have no blob
-            return { ...r, blob: blobFromBase64(r.dataB64, r.mime), dataB64: undefined };
-          });
-        } catch { results[i] = null; }
-        completed++;
-        onProgress?.(completed, items.length, item, true /* fromCache */);
-        continue;
+        // Some entries are oversized markers (no blob cached) — re-fetch those
+        // but skip the ones we have bytes for.
+        const hasOversized = cachedEntry.some(r => r.oversized);
+        if (!hasOversized) {
+          try {
+            results[i] = cachedEntry.map(r => {
+              if (r.kind || !r.dataB64) return r;
+              return { ...r, blob: blobFromBase64(r.dataB64, r.mime), dataB64: undefined };
+            });
+          } catch { results[i] = null; }
+          completed++;
+          onProgress?.(completed, items.length, item, true /* fromCache */);
+          continue;
+        }
+        // Fall through to re-fetch when any sub-blob was too big to cache.
       }
       try {
         const got = await fetchItem(item);
@@ -797,18 +802,34 @@ async function loadCheckpoint(courseId) {
   const key = `ckpt_${courseId}`;
   return (await chrome.storage.local.get(key))[key] || null;
 }
+// Skip checkpointing for files larger than this — base64 encoding triples
+// memory pressure, and very large blobs can break chrome.storage.local even
+// with the unlimitedStorage permission on some Chrome builds. The file will
+// be re-fetched on resume rather than restored from cache.
+const CHECKPOINT_MAX_BLOB_BYTES = 8 * 1024 * 1024;
+
 async function persistItemToCheckpoint(courseId, item, fetchResults) {
   if (!courseId) return;
   const key = `ckpt_${courseId}`;
-  const stored = (await chrome.storage.local.get(key))[key] || { startedAt: Date.now(), results: {} };
-  // Convert any Blob payloads to base64 so the value is serialisable.
-  const serial = await Promise.all((fetchResults || []).map(async r => {
-    if (r.kind || !r.blob) return r; // links/events/etc — keep as-is
-    const dataB64 = await blobToBase64(r.blob);
-    return { path: r.path, dataB64, mime: r.blob.type };
-  }));
-  stored.results[itemKey(item)] = serial;
-  await chrome.storage.local.set({ [key]: stored });
+  try {
+    const stored = (await chrome.storage.local.get(key))[key] || { startedAt: Date.now(), results: {} };
+    const serial = await Promise.all((fetchResults || []).map(async r => {
+      if (r.kind || !r.blob) return r;
+      if (r.blob.size > CHECKPOINT_MAX_BLOB_BYTES) {
+        // Mark this item as completed without caching the bytes; on resume we
+        // will re-fetch. Still better than re-running fetchItem from scratch
+        // because we record that the URL was reachable last time.
+        return { path: r.path, oversized: true, mime: r.blob.type };
+      }
+      const dataB64 = await blobToBase64(r.blob);
+      return { path: r.path, dataB64, mime: r.blob.type };
+    }));
+    stored.results[itemKey(item)] = serial;
+    await chrome.storage.local.set({ [key]: stored });
+  } catch (e) {
+    // Storage quota / serialisation errors should never crash the download.
+    console.warn('[Moodle Hoarder] checkpoint write failed:', e);
+  }
 }
 async function clearCheckpoint(courseId) {
   if (!courseId) return;
