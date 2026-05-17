@@ -77,14 +77,16 @@ $('scan').addEventListener('click', async () => {
     if (!tab?.url) throw new Error('אין טאב פעיל');
 
     if (/zoom\.us/.test(tab.url)) {
-      setStatus('סורק הקלטות Zoom...');
+      setStatus('ממתין שדף ה-Zoom ייטען...');
+      // Wait for the SPA to render its rows; poll until row count stabilizes.
+      await waitForZoomList(tab.id);
+      setStatus('סורק טבלת הקלטות...');
       const data = await extractZoomRecordings(tab.id);
       await saveZoomFile(data);
-      const n = data.recordings.length + data.scripts.length;
-      if (n === 0) {
-        setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד להוראות.');
+      if (data.recordings.length === 0) {
+        setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד לפרטים.');
       } else {
-        setStatus(`הושלם: ${data.recordings.length} הקלטות (${data.scripts.length} מסקריפטים).`);
+        setStatus(`הושלם: ${data.recordings.length} הקלטות.`);
         notify('Moodle Hoarder', `נמצאו ${data.recordings.length} הקלטות Zoom`);
       }
       $('scan').disabled = false;
@@ -929,10 +931,33 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
-// ===================== Zoom recordings (iteration 1) =====================
-// Strategy: scan the current tab (LTI page or any zoom.us page), collect any
-// recording links + surrounding metadata, dump to a text file. Resolution
-// of share URLs into play URLs (with the JWT token) is iteration 2.
+// ===================== Zoom recordings (iteration 2) =====================
+// Zoom LTI is a React SPA: recordings are <tr> rows, not <a href>. We scan
+// table rows by content (topic + meeting ID + date) rather than by URL.
+
+// Poll until row count is stable for ~1s, or 6s timeout.
+async function waitForZoomList(tabId) {
+  let last = -1, stable = 0;
+  const start = Date.now();
+  while (Date.now() - start < 6000) {
+    let count = 0;
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => document.querySelectorAll('table tbody tr, [role="rowgroup"] [role="row"]').length,
+      });
+      count = Math.max(0, ...results.map(r => r.result || 0));
+    } catch {}
+    if (count === last && count > 0) {
+      stable += 500;
+      if (stable >= 1000) return;
+    } else {
+      stable = 0;
+    }
+    last = count;
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
 
 async function extractZoomRecordings(tabId) {
   let results = [];
@@ -942,70 +967,107 @@ async function extractZoomRecordings(tabId) {
       func: scrapeZoomPage,
     });
   } catch (e) {
-    return { pageUrl: '', recordings: [], scripts: [], frames: 0, error: e.message };
+    return { pageUrl: '', recordings: [], debug: {}, frames: 0, error: e.message };
   }
-  const out = { pageUrl: '', recordings: [], scripts: [], frames: results.length };
+  const out = { pageUrl: '', recordings: [], debug: {}, frames: results.length };
   for (const r of results) {
     if (!r?.result) continue;
     if (r.result.pageUrl && !out.pageUrl) out.pageUrl = r.result.pageUrl;
     out.recordings.push(...(r.result.recordings || []));
-    out.scripts.push(...(r.result.scripts || []));
+    Object.assign(out.debug, r.result.debug || {});
   }
-  // Dedupe by URL
+  // Dedupe by meetingId+date (or by raw text if no id)
   const seen = new Set();
-  out.recordings = out.recordings.filter(r => seen.has(r.url) ? false : (seen.add(r.url), true));
-  out.scripts = [...new Set(out.scripts)];
+  out.recordings = out.recordings.filter(r => {
+    const k = (r.meetingId || '') + '|' + (r.date || '') + '|' + (r.topic || '').slice(0, 30);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
   return out;
 }
 
-// Runs IN PAGE CONTEXT (no popup APIs available here)
+// Runs IN PAGE CONTEXT
 function scrapeZoomPage() {
-  const REC_URL_RE = /zoom\.us\/(?:rec\/(?:share|play|download)|recording)\/[^"'\s<>]*/i;
+  // Zoom meeting IDs are 9-11 digits, usually displayed grouped: "843 9429 3109"
+  const ZOOM_ID_RE = /\b(\d{3,4}\s+\d{3,4}\s+\d{3,4})\b/;
+  // Dates: "May 19, 2025 8:42 AM" / "19/05/2025 8:42" / "2025-05-19"
+  const DATE_RE = /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}(?:[\s,]+\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)?|\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2})?|\d{4}-\d{1,2}-\d{1,2})/;
+  // Duration: "1h 30m" / "45m" / "1 hr 30 min"
+  const DUR_RE = /(\d+\s*(?:h|hr|hrs|שעות|שעה)(?:\s*\d+\s*(?:m|min|mins|דקות))?|\d+\s*(?:m|min|mins|דקות))/i;
+
+  const debug = { tables: 0, totalRows: 0, candidateRows: 0 };
   const recordings = [];
-  const push = (url, row) => {
-    const text = row ? row.textContent.trim().replace(/\s+/g, ' ').slice(0, 400) : '';
-    recordings.push({ url, text });
-  };
 
-  // 1) Direct anchors with rec/share or rec/play
-  for (const a of document.querySelectorAll('a[href]')) {
-    if (!REC_URL_RE.test(a.href)) continue;
-    const row = a.closest('tr, [role="row"], .meeting-card, [class*="recording"], [class*="meeting"], li') || a.parentElement;
-    push(a.href, row);
-  }
-
-  // 2) Table-row fallback: any row containing zoom links
-  if (!recordings.length) {
-    for (const row of document.querySelectorAll('table tr, [role="row"]')) {
-      const links = [...row.querySelectorAll('a[href]')].filter(a => /zoom\.us/.test(a.href));
-      for (const a of links) push(a.href, row);
+  // Strategy A: real <table> with <tbody><tr>
+  const tables = document.querySelectorAll('table');
+  debug.tables = tables.length;
+  for (const table of tables) {
+    const rows = table.querySelectorAll('tbody tr');
+    debug.totalRows += rows.length;
+    for (const row of rows) {
+      const cells = [...row.querySelectorAll('td')];
+      if (cells.length < 2) continue;
+      const cellTexts = cells.map(c => (c.textContent || '').trim().replace(/\s+/g, ' ')).filter(Boolean);
+      if (!cellTexts.length) continue;
+      const joined = cellTexts.join('  ');
+      const idMatch = joined.match(ZOOM_ID_RE);
+      const dateMatch = joined.match(DATE_RE);
+      const durMatch = joined.match(DUR_RE);
+      // Skip rows that don't look like recording entries
+      if (!idMatch && !dateMatch) continue;
+      debug.candidateRows++;
+      // Topic: pick the first cell that isn't ID/date/duration
+      let topic = '';
+      for (const t of cellTexts) {
+        if (idMatch && t.includes(idMatch[0])) continue;
+        if (dateMatch && t.includes(dateMatch[0])) continue;
+        if (durMatch && t === durMatch[0]) continue;
+        if (/^\s*$/.test(t)) continue;
+        topic = t;
+        break;
+      }
+      if (!topic) topic = cellTexts[0] || '';
+      recordings.push({
+        topic,
+        meetingId: idMatch ? idMatch[0].replace(/\s+/g, '') : '',
+        date: dateMatch ? dateMatch[0] : '',
+        duration: durMatch ? durMatch[0] : '',
+        rawCells: cellTexts,
+      });
     }
   }
 
-  // 3) Any button / clickable with onclick referencing recordings
-  for (const el of document.querySelectorAll('[onclick]')) {
-    const oc = el.getAttribute('onclick') || '';
-    const m = oc.match(REC_URL_RE);
-    if (m) push('https://' + m[0].replace(/^https?:\/\//, ''), el.closest('tr, li, .meeting-card') || el);
+  // Strategy B: ARIA grid rows (some SPAs)
+  if (!recordings.length) {
+    const ariaRows = document.querySelectorAll('[role="row"]');
+    debug.totalRows += ariaRows.length;
+    for (const row of ariaRows) {
+      const cellNodes = row.querySelectorAll('[role="cell"], [role="gridcell"]');
+      if (cellNodes.length < 2) continue;
+      const cellTexts = [...cellNodes].map(c => (c.textContent || '').trim().replace(/\s+/g, ' ')).filter(Boolean);
+      const joined = cellTexts.join('  ');
+      const idMatch = joined.match(ZOOM_ID_RE);
+      const dateMatch = joined.match(DATE_RE);
+      if (!idMatch && !dateMatch) continue;
+      debug.candidateRows++;
+      recordings.push({
+        topic: cellTexts[0] || '',
+        meetingId: idMatch ? idMatch[0].replace(/\s+/g, '') : '',
+        date: dateMatch ? dateMatch[0] : '',
+        duration: '',
+        rawCells: cellTexts,
+      });
+    }
   }
 
-  // 4) Mine <script> tags for embedded URLs (React/Vue state often has them)
-  const scriptUrls = [];
-  const SCRIPT_URL_RE = /https?:\/\/[a-z0-9.-]*zoom\.us\/(?:rec\/(?:share|play|download)|recording)\/[^"'\s<>]+/ig;
-  for (const s of document.querySelectorAll('script')) {
-    const t = s.textContent || '';
-    const matches = t.match(SCRIPT_URL_RE);
-    if (matches) scriptUrls.push(...matches);
+  // Capture sample HTML for debugging when nothing matched
+  if (!recordings.length) {
+    const firstRow = document.querySelector('table tbody tr, [role="row"]');
+    debug.firstRowHTML = firstRow ? firstRow.outerHTML.slice(0, 2000) : '(no rows in DOM)';
   }
 
-  // 5) Mine HTML data-* attributes
-  for (const el of document.querySelectorAll('[data-share-url], [data-recording-url], [data-play-url], [data-url]')) {
-    const u = el.getAttribute('data-share-url') || el.getAttribute('data-recording-url')
-           || el.getAttribute('data-play-url') || el.getAttribute('data-url') || '';
-    if (REC_URL_RE.test(u)) push(u.startsWith('http') ? u : 'https://' + u.replace(/^\/+/, ''), el.closest('tr, li') || el);
-  }
-
-  return { pageUrl: location.href, recordings, scripts: scriptUrls };
+  return { pageUrl: location.href, recordings, debug };
 }
 
 async function saveZoomFile(data) {
@@ -1014,9 +1076,7 @@ async function saveZoomFile(data) {
   lines.push('================================');
   lines.push(`Source: ${data.pageUrl || '(unknown)'}`);
   lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
-  lines.push(`Frames scanned: ${data.frames}`);
-  lines.push(`Recordings found: ${data.recordings.length}`);
-  lines.push(`URLs from page scripts: ${data.scripts.length}`);
+  lines.push(`Found:  ${data.recordings.length} recordings`);
   lines.push('');
 
   if (data.error) {
@@ -1024,34 +1084,45 @@ async function saveZoomFile(data) {
     lines.push('');
   }
 
-  if (!data.recordings.length && !data.scripts.length) {
+  if (!data.recordings.length) {
     lines.push('-- לא נמצאו הקלטות --');
     lines.push('');
-    lines.push('בדיקות:');
-    lines.push('1. ודא שאתה בדף הקלטות Zoom שנפתח דרך פעילות במודל (LTI).');
-    lines.push('2. רענן והמתן שהרשימה תיטען לגמרי לפני סריקה.');
-    lines.push('3. אם הדף מציג iframe (Zoom מוטמע בתוך מודל) — לעיתים צריך לפתוח את');
-    lines.push('   הפעילות בחלון חדש (כפתור "Open in new window" של מודל).');
+    lines.push('סטטיסטיקות סריקה:');
+    lines.push(`  טבלאות בדף: ${data.debug.tables ?? '?'}`);
+    lines.push(`  סך השורות שנסרקו: ${data.debug.totalRows ?? '?'}`);
+    lines.push(`  שורות שזוהו כמועמדות: ${data.debug.candidateRows ?? 0}`);
+    lines.push(`  iframes שנסרקו: ${data.frames}`);
     lines.push('');
-    lines.push('כל הקלטה שאתה רואה בדף אבל לא מופיעה כאן — צלם מסך / שלח HTML של השורה');
-    lines.push('כדי שאוכל להוסיף את ה-selector המתאים באיטרציה הבאה.');
+    lines.push('דברים שכדאי לבדוק:');
+    lines.push('1. ודא שאתה רואה את רשימת ההקלטות מולך לפני שתלחץ "סרוק".');
+    lines.push('2. נסה לעבור בין "Upcoming" ל-"Previous" tabs ולחזור.');
+    lines.push('3. ודא שהדף נפתח דרך פעילות מודל (LTI launch) ולא ישירות מ-URL.');
+    if (data.debug.firstRowHTML) {
+      lines.push('');
+      lines.push('-- HTML של שורה ראשונה שנמצאה (לדיבאג) --');
+      lines.push(data.debug.firstRowHTML);
+    }
   } else {
-    lines.push('-- Recordings --');
-    lines.push('');
-    for (const r of data.recordings) {
-      lines.push(r.text || '(no metadata)');
-      lines.push(r.url);
+    lines.push('=========================================================');
+    for (let i = 0; i < data.recordings.length; i++) {
+      const r = data.recordings[i];
       lines.push('');
-    }
-    if (data.scripts.length) {
-      lines.push('-- Extra URLs found in page scripts --');
-      for (const u of data.scripts) lines.push(u);
-      lines.push('');
+      lines.push(`#${i + 1}. ${r.topic || '(no topic)'}`);
+      if (r.meetingId) lines.push(`    Meeting ID: ${r.meetingId}`);
+      if (r.date)      lines.push(`    Date:       ${r.date}`);
+      if (r.duration)  lines.push(`    Duration:   ${r.duration}`);
+      if (r.rawCells && r.rawCells.length) {
+        lines.push(`    Raw:        ${r.rawCells.join(' | ')}`);
+      }
     }
     lines.push('');
-    lines.push('הערה: הקישורים האלו הם share-URLs ויידרשו אימות כשתפתח אותם.');
-    lines.push('באיטרציה הבאה התוסף ייפתח כל אחד בטאב נסתר וייצור play-URLs עם טוקן');
-    lines.push('שעובד מכל מכשיר ללא לוגין.');
+    lines.push('=========================================================');
+    lines.push('');
+    lines.push('הערה: באיטרציה הזו הקובץ מכיל רק מטא-דאטה (שם, תאריך, ID).');
+    lines.push('כדי לצפות בכל הקלטה — פתח את הדף ב-Zoom ולחץ על השורה המתאימה.');
+    lines.push('');
+    lines.push('באיטרציה הבאה (3): התוסף יפתח כל הקלטה ויחלץ play-URL עם טוקן');
+    lines.push('JWT שעובד מכל מכשיר ללא צורך בלוגין מחדש.');
   }
 
   const date = new Date().toISOString().slice(0, 10);
