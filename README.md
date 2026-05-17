@@ -8,7 +8,7 @@
 
 > Chrome extension that hoards every file, folder, assignment, syllabus and recording link from an Ariel University Moodle course into one tidy ZIP.
 
-![version](https://img.shields.io/badge/version-1.2.0-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
+![version](https://img.shields.io/badge/version-1.3.0-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
 
 ---
 
@@ -30,6 +30,7 @@
 - 🆕 **מצב Diff** — בסריקה השנייה ואילך, יודע מה כבר ירד ומציע להוריד רק מה שחדש
 - 📚 **הורדת מספר קורסים** — בדף "הקורסים שלי" אפשר לבחור כמה קורסים ולקבל ZIP נפרד לכל אחד
 - 🖱️ **קליק ימני** — "הורד עם Moodle Hoarder" על כל קישור במודל
+- 🎬 **Zoom Cloud Recordings** — בעמוד הקלטות Zoom שנפתח דרך מודל, לחיצה על "סרוק" מפיקה קובץ טקסט עם כל הקישורים, התאריכים והשמות
 - 🌙 **Dark mode** אוטומטי, RTL מלא, נוטיפיקציות מערכת
 
 לרשימה מלאה: [FEATURES.md](FEATURES.md)
@@ -60,6 +61,13 @@
 1. עבור ל-`https://moodlearn.ariel.ac.il/my/courses.php`
 2. פתח את התוסף → "סרוק" → סמן את הקורסים → "הורד את כל הקורסים שנבחרו"
 3. כל קורס יורד כ-ZIP נפרד
+
+### ייצוא הקלטות Zoom של קורס
+
+1. בעמוד הקורס במודל, לחץ על פעילות Zoom (פעילות LTI)
+2. דף הקלטות Zoom נטען
+3. פתח את התוסף → "סרוק"
+4. יורד `zoom-recordings_<תאריך>.txt` עם רשימת הקישורים והמטא-דאטה
 
 ### דדליינים ביומן
 

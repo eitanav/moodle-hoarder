@@ -2,7 +2,7 @@
 
 תוסף Chrome להורדה אוטומטית של כל החומר מקורסים במודל של אוניברסיטת אריאל.
 
-גרסה נוכחית: **1.2.0**
+גרסה נוכחית: **1.3.0**
 
 ---
 
@@ -62,6 +62,13 @@
 - שולף דדליין מכל מטלה (`mod/assign`) — תומך בעברית, אנגלית, פורמטים DD/MM/YYYY ו-YYYY-MM-DD.
 - בונה `deadlines.ics` בתוך ה-ZIP עם תזכורת יום אחד מראש.
 - אפשר לייבא ישירות ל-Google Calendar / Outlook / Apple Calendar (פתיחה כפולה של הקובץ).
+
+### Zoom Cloud Recordings (v1.3.0)
+- זיהוי אוטומטי של עמודי `*.zoom.us` (כולל `applications.zoom.us/lti/rich` שנפתח דרך LTI במודל).
+- סריקה של כל ה-iframes שבדף כדי לטפל גם ב-Zoom מוטמע בתוך Moodle.
+- חמש אסטרטגיות אחזור: anchors ישירים, שורות טבלה, handlers של onclick, mining של תגי `<script>`, ו-`data-*` attributes.
+- פלט: `zoom-recordings_<תאריך>.txt` עם שם הפגישה, תאריך/שעה, אורך וקישור.
+- **איטרציה הבאה (Phase 2):** רזולוציה אוטומטית של share-URLs ל-play-URLs (טוקן JWT שעובד מכל מכשיר).
 
 ### תפריט קליק ימני
 - קליק ימני על כל קישור במודל → **"הורד עם Moodle Hoarder"**.

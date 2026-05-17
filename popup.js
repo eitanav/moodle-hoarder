@@ -76,7 +76,20 @@ $('scan').addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url) throw new Error('אין טאב פעיל');
 
-    if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
+    if (/zoom\.us/.test(tab.url)) {
+      setStatus('סורק הקלטות Zoom...');
+      const data = await extractZoomRecordings(tab.id);
+      await saveZoomFile(data);
+      const n = data.recordings.length + data.scripts.length;
+      if (n === 0) {
+        setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד להוראות.');
+      } else {
+        setStatus(`הושלם: ${data.recordings.length} הקלטות (${data.scripts.length} מסקריפטים).`);
+        notify('Moodle Hoarder', `נמצאו ${data.recordings.length} הקלטות Zoom`);
+      }
+      $('scan').disabled = false;
+      return;
+    } else if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
       setStatus('סורק קורסים...');
       const res = await fetch(tab.url, { credentials: 'include' });
       const html = await res.text();
@@ -914,4 +927,139 @@ function formatSize(n) {
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ===================== Zoom recordings (iteration 1) =====================
+// Strategy: scan the current tab (LTI page or any zoom.us page), collect any
+// recording links + surrounding metadata, dump to a text file. Resolution
+// of share URLs into play URLs (with the JWT token) is iteration 2.
+
+async function extractZoomRecordings(tabId) {
+  let results = [];
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: scrapeZoomPage,
+    });
+  } catch (e) {
+    return { pageUrl: '', recordings: [], scripts: [], frames: 0, error: e.message };
+  }
+  const out = { pageUrl: '', recordings: [], scripts: [], frames: results.length };
+  for (const r of results) {
+    if (!r?.result) continue;
+    if (r.result.pageUrl && !out.pageUrl) out.pageUrl = r.result.pageUrl;
+    out.recordings.push(...(r.result.recordings || []));
+    out.scripts.push(...(r.result.scripts || []));
+  }
+  // Dedupe by URL
+  const seen = new Set();
+  out.recordings = out.recordings.filter(r => seen.has(r.url) ? false : (seen.add(r.url), true));
+  out.scripts = [...new Set(out.scripts)];
+  return out;
+}
+
+// Runs IN PAGE CONTEXT (no popup APIs available here)
+function scrapeZoomPage() {
+  const REC_URL_RE = /zoom\.us\/(?:rec\/(?:share|play|download)|recording)\/[^"'\s<>]*/i;
+  const recordings = [];
+  const push = (url, row) => {
+    const text = row ? row.textContent.trim().replace(/\s+/g, ' ').slice(0, 400) : '';
+    recordings.push({ url, text });
+  };
+
+  // 1) Direct anchors with rec/share or rec/play
+  for (const a of document.querySelectorAll('a[href]')) {
+    if (!REC_URL_RE.test(a.href)) continue;
+    const row = a.closest('tr, [role="row"], .meeting-card, [class*="recording"], [class*="meeting"], li') || a.parentElement;
+    push(a.href, row);
+  }
+
+  // 2) Table-row fallback: any row containing zoom links
+  if (!recordings.length) {
+    for (const row of document.querySelectorAll('table tr, [role="row"]')) {
+      const links = [...row.querySelectorAll('a[href]')].filter(a => /zoom\.us/.test(a.href));
+      for (const a of links) push(a.href, row);
+    }
+  }
+
+  // 3) Any button / clickable with onclick referencing recordings
+  for (const el of document.querySelectorAll('[onclick]')) {
+    const oc = el.getAttribute('onclick') || '';
+    const m = oc.match(REC_URL_RE);
+    if (m) push('https://' + m[0].replace(/^https?:\/\//, ''), el.closest('tr, li, .meeting-card') || el);
+  }
+
+  // 4) Mine <script> tags for embedded URLs (React/Vue state often has them)
+  const scriptUrls = [];
+  const SCRIPT_URL_RE = /https?:\/\/[a-z0-9.-]*zoom\.us\/(?:rec\/(?:share|play|download)|recording)\/[^"'\s<>]+/ig;
+  for (const s of document.querySelectorAll('script')) {
+    const t = s.textContent || '';
+    const matches = t.match(SCRIPT_URL_RE);
+    if (matches) scriptUrls.push(...matches);
+  }
+
+  // 5) Mine HTML data-* attributes
+  for (const el of document.querySelectorAll('[data-share-url], [data-recording-url], [data-play-url], [data-url]')) {
+    const u = el.getAttribute('data-share-url') || el.getAttribute('data-recording-url')
+           || el.getAttribute('data-play-url') || el.getAttribute('data-url') || '';
+    if (REC_URL_RE.test(u)) push(u.startsWith('http') ? u : 'https://' + u.replace(/^\/+/, ''), el.closest('tr, li') || el);
+  }
+
+  return { pageUrl: location.href, recordings, scripts: scriptUrls };
+}
+
+async function saveZoomFile(data) {
+  const lines = [];
+  lines.push('Moodle Hoarder — Zoom Recordings');
+  lines.push('================================');
+  lines.push(`Source: ${data.pageUrl || '(unknown)'}`);
+  lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
+  lines.push(`Frames scanned: ${data.frames}`);
+  lines.push(`Recordings found: ${data.recordings.length}`);
+  lines.push(`URLs from page scripts: ${data.scripts.length}`);
+  lines.push('');
+
+  if (data.error) {
+    lines.push('שגיאה בסריקה: ' + data.error);
+    lines.push('');
+  }
+
+  if (!data.recordings.length && !data.scripts.length) {
+    lines.push('-- לא נמצאו הקלטות --');
+    lines.push('');
+    lines.push('בדיקות:');
+    lines.push('1. ודא שאתה בדף הקלטות Zoom שנפתח דרך פעילות במודל (LTI).');
+    lines.push('2. רענן והמתן שהרשימה תיטען לגמרי לפני סריקה.');
+    lines.push('3. אם הדף מציג iframe (Zoom מוטמע בתוך מודל) — לעיתים צריך לפתוח את');
+    lines.push('   הפעילות בחלון חדש (כפתור "Open in new window" של מודל).');
+    lines.push('');
+    lines.push('כל הקלטה שאתה רואה בדף אבל לא מופיעה כאן — צלם מסך / שלח HTML של השורה');
+    lines.push('כדי שאוכל להוסיף את ה-selector המתאים באיטרציה הבאה.');
+  } else {
+    lines.push('-- Recordings --');
+    lines.push('');
+    for (const r of data.recordings) {
+      lines.push(r.text || '(no metadata)');
+      lines.push(r.url);
+      lines.push('');
+    }
+    if (data.scripts.length) {
+      lines.push('-- Extra URLs found in page scripts --');
+      for (const u of data.scripts) lines.push(u);
+      lines.push('');
+    }
+    lines.push('');
+    lines.push('הערה: הקישורים האלו הם share-URLs ויידרשו אימות כשתפתח אותם.');
+    lines.push('באיטרציה הבאה התוסף ייפתח כל אחד בטאב נסתר וייצור play-URLs עם טוקן');
+    lines.push('שעובד מכל מכשיר ללא לוגין.');
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  await chrome.downloads.download({
+    url,
+    filename: `zoom-recordings_${date}.txt`,
+    saveAs: false,
+  });
 }
