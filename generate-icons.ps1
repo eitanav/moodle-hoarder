@@ -1,70 +1,37 @@
 Add-Type -AssemblyName System.Drawing
 
-function New-MhIcon([int]$size, [string]$out) {
-    $bmp = New-Object System.Drawing.Bitmap($size, $size)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.Clear([System.Drawing.Color]::Transparent)
+# Resizes a source PNG to multiple icon sizes for the Chrome extension.
+# Drop a high-res master image at icons/icon-source.png and run this script.
 
-    # Rounded square background with gradient (orange -> magenta)
-    $r = [single]($size * 0.22)
-    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $p.AddArc(0, 0, $r * 2, $r * 2, 180, 90)
-    $p.AddArc($size - $r * 2, 0, $r * 2, $r * 2, 270, 90)
-    $p.AddArc($size - $r * 2, $size - $r * 2, $r * 2, $r * 2, 0, 90)
-    $p.AddArc(0, $size - $r * 2, $r * 2, $r * 2, 90, 90)
-    $p.CloseFigure()
+$ErrorActionPreference = 'Stop'
+$dir = Join-Path $PSScriptRoot 'icons'
+$src = Join-Path $dir 'icon-source.png'
 
-    $rect = New-Object System.Drawing.Rectangle(0, 0, $size, $size)
-    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-        $rect,
-        [System.Drawing.Color]::FromArgb(255, 255, 140, 60),
-        [System.Drawing.Color]::FromArgb(255, 220, 40, 110),
-        45
-    )
-    $g.FillPath($brush, $p)
-
-    # Folder shape (white)
-    $folderW = [single]($size * 0.62)
-    $folderH = [single]($size * 0.42)
-    $fx = [single](($size - $folderW) / 2)
-    $fy = [single]($size * 0.40)
-    $tabW = [single]($folderW * 0.35)
-    $tabH = [single]($size * 0.07)
-
-    $folderPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $folderPath.AddLine($fx, $fy, $fx + $tabW, $fy)
-    $folderPath.AddLine($fx + $tabW, $fy, $fx + $tabW + $tabH, $fy - $tabH)
-    $folderPath.AddLine($fx + $tabW + $tabH, $fy - $tabH, $fx + $folderW, $fy - $tabH)
-    $folderPath.AddLine($fx + $folderW, $fy - $tabH, $fx + $folderW, $fy + $folderH)
-    $folderPath.AddLine($fx + $folderW, $fy + $folderH, $fx, $fy + $folderH)
-    $folderPath.CloseFigure()
-    $g.FillPath([System.Drawing.Brushes]::White, $folderPath)
-
-    # Download arrow inside folder
-    $penW = [single]([Math]::Max(2, $size * 0.07))
-    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 220, 40, 110), $penW)
-    $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-
-    $cx = [single]($size / 2)
-    $aTop = [single]($size * 0.50)
-    $aBot = [single]($size * 0.76)
-    $aw = [single]($size * 0.12)
-    $g.DrawLine($pen, $cx, $aTop, $cx, $aBot)
-    $g.DrawLine($pen, $cx - $aw, $aBot - $aw, $cx, $aBot)
-    $g.DrawLine($pen, $cx + $aw, $aBot - $aw, $cx, $aBot)
-
-    $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
-    $g.Dispose()
-    $bmp.Dispose()
-    Write-Host "Wrote $out"
+if (-not (Test-Path $src)) {
+    throw "Source icon not found at $src. Place a square high-res PNG there first."
 }
 
-$dir = Join-Path $PSScriptRoot "icons"
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
+function Resize-Icon([string]$source, [int]$size, [string]$out) {
+    $img = [System.Drawing.Image]::FromFile($source)
+    try {
+        $bmp = New-Object System.Drawing.Bitmap($size, $size)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        try {
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+            $g.Clear([System.Drawing.Color]::Transparent)
+            $g.DrawImage($img, 0, 0, $size, $size)
+            $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-Host "Wrote $out ($size x $size)"
+        }
+        finally { $g.Dispose() }
+        $bmp.Dispose()
+    }
+    finally { $img.Dispose() }
+}
+
 foreach ($s in 16, 32, 48, 128) {
-    New-MhIcon $s (Join-Path $dir "icon-$s.png")
+    Resize-Icon $src $s (Join-Path $dir "icon-$s.png")
 }

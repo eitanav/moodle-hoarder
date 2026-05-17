@@ -87,10 +87,25 @@ $('scan').addEventListener('click', async () => {
       }
       // Step 2: open each recording's detail page and extract its URLs.
       setStatus(`נמצאו ${data.recordings.length} הקלטות. מתחיל פענוח קישורים — אל תסגור!`);
-      await resolveZoomPlayUrls(tab.id, data.recordings, (s) => setStatus(s));
+      const debugHtml = await resolveZoomPlayUrls(tab.id, data.recordings, (s) => setStatus(s));
       await saveZoomFile(data);
       const ok = data.recordings.filter(r => r.shareUrls?.length).length;
-      setStatus(`הושלם: ${ok}/${data.recordings.length} קישורים נמצאו, מ-${data.pages} עמודים.`);
+      // If nothing was found, dump the first detail page HTML so we can diagnose.
+      if (ok === 0 && debugHtml) {
+        const date = new Date().toISOString().slice(0, 10);
+        const dumpBlob = new Blob([
+          `<!-- Source URL: ${debugHtml.sourceUrl} -->\n<!-- Captured: ${new Date().toISOString()} -->\n`,
+          debugHtml.html,
+        ], { type: 'text/html;charset=utf-8' });
+        await chrome.downloads.download({
+          url: URL.createObjectURL(dumpBlob),
+          filename: `zoom-detail-debug_${date}.html`,
+          saveAs: false,
+        });
+        setStatus(`לא נמצאו URLs בדף ה-detail. גם הורד zoom-detail-debug HTML — שלח אותו כדי לקבל סלקטור מדויק.`);
+      } else {
+        setStatus(`הושלם: ${ok}/${data.recordings.length} קישורים נמצאו, מ-${data.pages} עמודים.`);
+      }
       notify('Moodle Hoarder', `Zoom: ${ok}/${data.recordings.length} קישורים נחלצו`);
       $('scan').disabled = false;
       return;
@@ -1320,11 +1335,11 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
 
   const totalPages = Math.max(1, ...recordings.map(r => r.page || 1));
   let recDone = 0;
+  let debugHtml = null; // grabbed once, on the first detail page
 
   for (let p = totalPages; p >= 1; p--) {
     const onPage = recordings.filter(r => (r.page || 1) === p);
     if (!onPage.length) continue;
-    // Make sure list is rendered on this page before clicking
     await waitForZoomList(tabId);
 
     for (let i = 0; i < onPage.length; i++) {
@@ -1341,6 +1356,14 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
       rec.shareUrls = detail.urls;
       if (!detail.urls.length) rec.error = 'detail did not expose URL';
 
+      // Capture HTML of the first detail page we visit (for debugging unknown layouts)
+      if (debugHtml === null) {
+        const dump = await dumpCurrentPageHtml(tabId);
+        if (dump?.html) {
+          debugHtml = { sourceUrl: dump.url || '', html: dump.html.slice(0, 800000) };
+        }
+      }
+
       await navigateBackInZoom(tabId);
       const ok = await waitForListPage(tabId, 6000);
       if (!ok) rec.error = (rec.error ? rec.error + '; ' : '') + 'list did not restore';
@@ -1353,6 +1376,8 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
       await new Promise(r => setTimeout(r, 800));
     }
   }
+
+  return debugHtml;
 }
 
 // Click the i'th row in the table that contains zoom meeting IDs.
@@ -1389,52 +1414,93 @@ async function clickRecordingRow(tabId, rowIdx) {
 }
 
 // Poll until any zoom recording URL appears on the page, or timeout.
+// Broad matching: any zoom URL with rec|recording, any target=_blank link,
+// any data-* attribute carrying a zoom URL.
 async function waitForDetailPage(tabId, timeoutMs = 8000) {
   const start = Date.now();
+  let detailUrl = '';
   while (Date.now() - start < timeoutMs) {
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: () => {
-          const REC_RE = /https?:\/\/[^\s"'<>]*zoom\.us\/rec\/(?:share|play|download)\/[^\s"'<>?#]+(?:\?[^\s"'<>#]*)?/g;
+          const REC_RE = /https?:\/\/[^\s"'<>]*zoom\.us\/[^\s"'<>?#]*(?:rec|recording)\/[^\s"'<>?#]+(?:\?[^\s"'<>#]*)?/g;
           const found = new Set();
-          // Anchors
+          const isRecording = (u) => /zoom\.us\/(?:rec|recording)\//.test(u) || /\/recording\/(?:play|share|detail)/i.test(u);
+
+          // Anchors with a recording-shaped href
           for (const a of document.querySelectorAll('a[href]')) {
-            if (/zoom\.us\/rec\/(?:share|play|download)/.test(a.href)) found.add(a.href);
+            const href = a.href || '';
+            if (isRecording(href)) found.add(href);
           }
-          // Inputs / textareas (Zoom often shows the URL in a copyable input)
+          // Anchors that open in a new tab — Zoom uses these for play/download
+          for (const a of document.querySelectorAll('a[target="_blank"][href]')) {
+            const href = a.href || '';
+            if (!href || href.startsWith('javascript:') || href.endsWith('#')) continue;
+            // Tag with marker so we can spot in output
+            if (/zoom\.us/.test(href) || /recording/i.test(href)) found.add(href);
+            else found.add('[blank] ' + href);
+          }
+          // Input / textarea values (Zoom shows share URL in copyable input)
           for (const el of document.querySelectorAll('input, textarea')) {
             const v = (el.value ?? '').toString();
             const ms = v.match(REC_RE);
             if (ms) ms.forEach(u => found.add(u));
           }
-          // Visible body text (some pages render the URL as text)
+          // Visible body text
           const txt = (document.body && document.body.innerText) || '';
           const tm = txt.match(REC_RE);
           if (tm) tm.forEach(u => found.add(u));
-          // data-* attributes
-          for (const el of document.querySelectorAll('[data-url], [data-share-url], [data-play-url], [data-recording-url]')) {
-            for (const name of ['data-url','data-share-url','data-play-url','data-recording-url']) {
-              const v = el.getAttribute(name) || '';
-              const ms = v.match(REC_RE);
-              if (ms) ms.forEach(u => found.add(u));
+          // Any data-* attribute carrying a recording URL
+          for (const el of document.querySelectorAll('*')) {
+            for (const attr of el.attributes || []) {
+              if (!attr.name.startsWith('data-')) continue;
+              const v = attr.value || '';
+              if (isRecording(v)) {
+                found.add(v.startsWith('http') ? v : ('https:' + (v.startsWith('//') ? v : '//' + v.replace(/^\/+/, ''))));
+              }
             }
+          }
+          // onclick handlers (as strings) with embedded URLs
+          for (const el of document.querySelectorAll('[onclick]')) {
+            const oc = el.getAttribute('onclick') || '';
+            const ms = oc.match(REC_RE);
+            if (ms) ms.forEach(u => found.add(u));
           }
           return { url: location.href, urls: [...found] };
         },
       });
       const all = new Set();
-      let url = '';
       for (const r of results) {
         if (!r?.result) continue;
-        if (r.result.url && !url) url = r.result.url;
+        if (r.result.url && !detailUrl) detailUrl = r.result.url;
         for (const u of r.result.urls) all.add(u);
       }
-      if (all.size > 0) return { url, urls: [...all] };
+      if (all.size > 0) return { url: detailUrl, urls: [...all] };
     } catch {}
     await new Promise(r => setTimeout(r, 400));
   }
-  return { url: '', urls: [] };
+  return { url: detailUrl, urls: [] };
+}
+
+// Capture the full body HTML of the current page (for debugging unknown layouts).
+async function dumpCurrentPageHtml(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => ({
+        url: location.href,
+        html: (document.body && document.body.outerHTML) || '',
+      }),
+    });
+    // Pick the largest payload (likely the detail content frame, not chrome)
+    let best = null;
+    for (const r of results) {
+      if (!r?.result?.html) continue;
+      if (!best || r.result.html.length > best.html.length) best = r.result;
+    }
+    return best;
+  } catch { return null; }
 }
 
 // Navigate back from detail to list: try a back/breadcrumb button, fall back to history.back().
