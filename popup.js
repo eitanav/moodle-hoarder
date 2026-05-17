@@ -1343,11 +1343,23 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
 
   const totalPages = Math.max(1, ...recordings.map(r => r.page || 1));
   let recDone = 0;
-  let debugHtml = null; // grabbed once, on the first detail page
+  let debugHtml = null;
+  // After scraping pagination we're on the last page. We don't actually
+  // need to know that — every page iteration starts with an explicit
+  // navigation to the target page number.
+  let currentPage = null;
 
-  for (let p = totalPages; p >= 1; p--) {
+  for (let p = 1; p <= totalPages; p++) {
     const onPage = recordings.filter(r => (r.page || 1) === p);
     if (!onPage.length) continue;
+
+    onProgress?.(`מעבר לעמוד ${p}...`);
+    currentPage = await navigateToZoomPage(tabId, p, currentPage ?? totalPages);
+    if (currentPage !== p) {
+      // Couldn't get to the target page — mark all entries on it as such and skip.
+      for (const rec of onPage) rec.error = `couldn't navigate to page ${p}`;
+      continue;
+    }
     await waitForZoomList(tabId);
 
     for (let i = 0; i < onPage.length; i++) {
@@ -1362,40 +1374,74 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
       const detail = await waitForDetailPage(tabId, 8000);
       rec.detailUrl = detail.url;
       rec.shareUrls = detail.urls;
-      // Passive scrape didn't find anything? Try clicking the play button and
-      // intercepting window.open / programmatic anchor clicks. This is how
-      // Zoom LTI actually surfaces the URL.
       if (!rec.shareUrls.length) {
         const captured = await clickPlayAndCaptureUrl(tabId);
-        if (captured.length) {
-          rec.shareUrls = captured;
-        } else {
-          rec.error = 'no URL on detail; play-button click captured nothing';
-        }
+        if (captured.length) rec.shareUrls = captured;
+        else rec.error = 'no URL on detail; play-button click captured nothing';
       }
 
-      // Capture HTML of the first detail page we visit (for debugging unknown layouts)
       if (debugHtml === null) {
         const dump = await dumpCurrentPageHtml(tabId);
-        if (dump?.html) {
-          debugHtml = { sourceUrl: dump.url || '', html: dump.html.slice(0, 800000) };
-        }
+        if (dump?.html) debugHtml = { sourceUrl: dump.url || '', html: dump.html.slice(0, 800000) };
       }
 
       await navigateBackInZoom(tabId);
       const ok = await waitForListPage(tabId, 6000);
       if (!ok) rec.error = (rec.error ? rec.error + '; ' : '') + 'list did not restore';
     }
-
-    if (p > 1) {
-      onProgress?.(`חוזר לעמוד ${p - 1}...`);
-      const prev = await clickZoomPrevPage(tabId);
-      if (!prev) { onProgress?.(`לא נמצא כפתור Previous — עוצר.`); break; }
-      await new Promise(r => setTimeout(r, 800));
-    }
   }
 
   return debugHtml;
+}
+
+// Navigate to a specific page in the Zoom LTI pagination. Tries clicking the
+// numbered item directly (Ant Design: .ant-pagination-item-N), then falls
+// back to Next/Previous clicks one step at a time.
+async function navigateToZoomPage(tabId, targetPage, currentPage) {
+  if (currentPage === targetPage) return targetPage;
+
+  // 1) Try direct click on the page number
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      args: [targetPage],
+      func: (n) => {
+        // Already active? Done.
+        const active = document.querySelector('.ant-pagination-item-active');
+        if (active && active.classList.contains(`ant-pagination-item-${n}`)) return 'already';
+        // Click the page item (or its inner anchor)
+        const item = document.querySelector(`.ant-pagination-item-${n}`);
+        if (item) {
+          const inner = item.querySelector('a');
+          (inner || item).click();
+          return 'clicked';
+        }
+        return 'not-found';
+      },
+    });
+    if (results.some(r => r?.result === 'already' || r?.result === 'clicked')) {
+      await new Promise(r => setTimeout(r, 800));
+      await waitForZoomList(tabId);
+      return targetPage;
+    }
+  } catch {}
+
+  // 2) Fall back to one-step clicks
+  while (currentPage < targetPage) {
+    const ok = await clickZoomNextPage(tabId);
+    if (!ok) return currentPage;
+    await new Promise(r => setTimeout(r, 800));
+    await waitForZoomList(tabId);
+    currentPage++;
+  }
+  while (currentPage > targetPage) {
+    const ok = await clickZoomPrevPage(tabId);
+    if (!ok) return currentPage;
+    await new Promise(r => setTimeout(r, 800));
+    await waitForZoomList(tabId);
+    currentPage--;
+  }
+  return currentPage;
 }
 
 // Click the i'th row in the table that contains zoom meeting IDs.
