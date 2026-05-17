@@ -1033,15 +1033,38 @@ function parseDate(text) {
 }
 
 // ========== Helpers ==========
+// Moodle often emits `Content-Disposition: filename="<UTF-8 bytes>"` directly
+// instead of using RFC 5987. HTTP headers are transported as ISO-8859-1, so
+// fetch() returns each byte as a Latin-1 char and we get mojibake (ÃÂ¡ etc).
+// If we can re-encode each char as a single byte and parse it as valid
+// UTF-8, that gives us the real string back.
+function fixMojibake(s) {
+  if (!s) return s;
+  let nonAscii = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 0xff) return s;          // not Latin-1 single bytes; nothing to do
+    if (c > 0x7f) nonAscii = true;
+  }
+  if (!nonAscii) return s;
+  try {
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return s;
+  }
+}
+
 function filenameFromResponse(res) {
   const cd = res.headers.get('Content-Disposition');
   if (!cd) return null;
   let m = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
   if (m) { try { return decodeURIComponent(m[1].trim().replace(/^"|"$/g, '')); } catch {} }
   m = cd.match(/filename\s*=\s*"([^"]+)"/i);
-  if (m) return m[1];
+  if (m) return fixMojibake(m[1]);
   m = cd.match(/filename\s*=\s*([^;]+)/i);
-  if (m) return m[1].trim();
+  if (m) return fixMojibake(m[1].trim());
   return null;
 }
 function extFromCT(ct) {

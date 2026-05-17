@@ -23,20 +23,32 @@ function dosDateTime(d = new Date()) {
   return { time, date };
 }
 
-// Info-ZIP Unicode Path Extra Field (0x7075). Adding this on every entry makes
-// the file display Hebrew (and other non-ASCII) names correctly even on
-// Windows Explorer's built-in ZIP, which often ignores the UTF-8 bit alone.
+// Replace any non-printable-ASCII codepoint with '_'. Used as a Cp437/ASCII
+// fallback for the LFH/CDH filename when the real path contains Hebrew or
+// other Unicode. Slashes are preserved (still valid folder separators in ZIP).
+function asciiFallback(s) {
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    out += (cp >= 0x20 && cp <= 0x7e) ? ch : '_';
+  }
+  return out;
+}
+
+// Info-ZIP Unicode Path Extra Field (0x7075). Convention: the LFH filename
+// is the local-codepage (here ASCII) version, and this extra field carries
+// the real UTF-8 name plus CRC32 of the LFH filename so extractors can
+// validate the pairing.
 // Layout: 2B HeaderID | 2B DataSize | 1B Version | 4B NameCRC32 | NB UnicodeName
-function makeUnicodePathExtra(nameBytes) {
-  const crc = crc32(nameBytes);
-  const dataLen = 5 + nameBytes.length;
+function makeUnicodePathExtra(lfhCRC, utf8NameBytes) {
+  const dataLen = 5 + utf8NameBytes.length;
   const buf = new Uint8Array(4 + dataLen);
   const dv = new DataView(buf.buffer);
   dv.setUint16(0, 0x7075, true);
   dv.setUint16(2, dataLen, true);
   dv.setUint8(4, 1);
-  dv.setUint32(5, crc, true);
-  buf.set(nameBytes, 9);
+  dv.setUint32(5, lfhCRC, true);
+  buf.set(utf8NameBytes, 9);
   return buf;
 }
 
@@ -50,44 +62,54 @@ async function buildZip(files) {
 
   for (const { path, blob } of files) {
     const data = new Uint8Array(await blob.arrayBuffer());
-    const nameBytes = encoder.encode(path);
-    const extra = makeUnicodePathExtra(nameBytes);
+
+    // ASCII fallback in the LFH; UTF-8 unicode name only in the extra field.
+    // This is what JSZip / Info-ZIP / 7-Zip emit and what Windows Explorer
+    // expects. Setting the UTF-8 flag AND adding the extra field made some
+    // Windows builds refuse to open the archive.
+    const utf8Name = encoder.encode(path);
+    const ascii = asciiFallback(path);
+    const isAscii = ascii === path;
+    const lfhName = isAscii ? utf8Name : encoder.encode(ascii);
+    const lfhCRC = isAscii ? 0 : crc32(lfhName);
+    const extra = isAscii ? new Uint8Array(0) : makeUnicodePathExtra(lfhCRC, utf8Name);
+
     const crc = crc32(data);
 
-    const lfh = new Uint8Array(30 + nameBytes.length + extra.length);
+    const lfh = new Uint8Array(30 + lfhName.length + extra.length);
     const lv = new DataView(lfh.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true); // UTF-8 name flag (belt + suspenders)
-    lv.setUint16(8, 0, true);      // method = store
+    lv.setUint16(6, 0, true);       // no UTF-8 flag (LFH name is ASCII-only)
+    lv.setUint16(8, 0, true);       // method = store
     lv.setUint16(10, time, true);
     lv.setUint16(12, date, true);
     lv.setUint32(14, crc, true);
     lv.setUint32(18, data.length, true);
     lv.setUint32(22, data.length, true);
-    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(26, lfhName.length, true);
     lv.setUint16(28, extra.length, true);
-    lfh.set(nameBytes, 30);
-    lfh.set(extra, 30 + nameBytes.length);
+    lfh.set(lfhName, 30);
+    if (extra.length) lfh.set(extra, 30 + lfhName.length);
     chunks.push(lfh, data);
 
-    const cdh = new Uint8Array(46 + nameBytes.length + extra.length);
+    const cdh = new Uint8Array(46 + lfhName.length + extra.length);
     const cv = new DataView(cdh.buffer);
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(8, 0, true);       // no UTF-8 flag
     cv.setUint16(10, 0, true);
     cv.setUint16(12, time, true);
     cv.setUint16(14, date, true);
     cv.setUint32(16, crc, true);
     cv.setUint32(20, data.length, true);
     cv.setUint32(24, data.length, true);
-    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(28, lfhName.length, true);
     cv.setUint16(30, extra.length, true);
     cv.setUint32(42, offset, true);
-    cdh.set(nameBytes, 46);
-    cdh.set(extra, 46 + nameBytes.length);
+    cdh.set(lfhName, 46);
+    if (extra.length) cdh.set(extra, 46 + lfhName.length);
     central.push(cdh);
 
     offset += lfh.length + data.length;
