@@ -1236,6 +1236,10 @@ async function clickZoomNextPage(tabId) {
         };
         // Selector candidates ordered by specificity
         const selectors = [
+          // Ant Design pagination (used by Zoom LTI)
+          'li.ant-pagination-next:not(.ant-pagination-disabled) a',
+          'li.ant-pagination-next:not(.ant-pagination-disabled)',
+          '.ant-pagination-next:not(.ant-pagination-disabled)',
           'button[aria-label*="Next page" i]',
           'button[aria-label*="next" i]',
           'a[aria-label*="Next page" i]',
@@ -1290,6 +1294,10 @@ async function clickZoomPrevPage(tabId) {
           return false;
         };
         const selectors = [
+          // Ant Design pagination
+          'li.ant-pagination-prev:not(.ant-pagination-disabled) a',
+          'li.ant-pagination-prev:not(.ant-pagination-disabled)',
+          '.ant-pagination-prev:not(.ant-pagination-disabled)',
           'button[aria-label*="Previous page" i]',
           'button[aria-label*="previous" i]',
           'a[aria-label*="previous" i]',
@@ -1354,7 +1362,17 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
       const detail = await waitForDetailPage(tabId, 8000);
       rec.detailUrl = detail.url;
       rec.shareUrls = detail.urls;
-      if (!detail.urls.length) rec.error = 'detail did not expose URL';
+      // Passive scrape didn't find anything? Try clicking the play button and
+      // intercepting window.open / programmatic anchor clicks. This is how
+      // Zoom LTI actually surfaces the URL.
+      if (!rec.shareUrls.length) {
+        const captured = await clickPlayAndCaptureUrl(tabId);
+        if (captured.length) {
+          rec.shareUrls = captured;
+        } else {
+          rec.error = 'no URL on detail; play-button click captured nothing';
+        }
+      }
 
       // Capture HTML of the first detail page we visit (for debugging unknown layouts)
       if (debugHtml === null) {
@@ -1503,12 +1521,20 @@ async function dumpCurrentPageHtml(tabId) {
   } catch { return null; }
 }
 
-// Navigate back from detail to list: try a back/breadcrumb button, fall back to history.back().
+// Navigate back from detail to list: prefer the Ant breadcrumb link Zoom uses,
+// fall back to history.back().
 async function navigateBackInZoom(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       func: () => {
+        // Zoom LTI uses Ant breadcrumbs: first .ant-breadcrumb-link contains a clickable span.
+        const breadcrumb = document.querySelector('.ant-breadcrumb');
+        if (breadcrumb) {
+          // Find the first clickable link in the breadcrumb (typically "Course Recordings")
+          const btn = breadcrumb.querySelector('[role="button"], a[href]:not([href="#"])');
+          if (btn) { btn.click(); return; }
+        }
         const sel = [
           '[aria-label*="back" i]',
           'button[class*="back" i]',
@@ -1525,6 +1551,75 @@ async function navigateBackInZoom(tabId) {
     });
   } catch {}
   await new Promise(r => setTimeout(r, 600));
+}
+
+// On the recording detail page, click the play button (Zoom's
+// `.lti-recording-item-play-media` span) and capture the URL Zoom tries to
+// open via window.open. This runs in MAIN world so we can override the
+// real window.open of the page.
+async function clickPlayAndCaptureUrl(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      world: 'MAIN',
+      func: async () => {
+        const origOpen = window.open;
+        const captured = [];
+        // Replace window.open with a capturer that returns a fake window so
+        // Zoom's caller code doesn't choke on `.focus()`, `.postMessage()`, etc.
+        const fakeWin = {
+          closed: false,
+          location: { href: '', replace() {}, assign(u) { captured.push(String(u)); } },
+          close() { this.closed = true; },
+          focus() {}, blur() {}, postMessage() {},
+          document: { write() {}, writeln() {}, close() {} },
+        };
+        window.open = function (url) {
+          if (url) captured.push(String(url));
+          fakeWin.location.href = String(url || '');
+          return fakeWin;
+        };
+
+        // Also intercept programmatic <a target="_blank"> clicks via createElement('a').click()
+        const origClick = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () {
+          if (this.href && this.target === '_blank') {
+            captured.push(this.href);
+            return;
+          }
+          return origClick.apply(this, arguments);
+        };
+
+        const restore = () => {
+          window.open = origOpen;
+          HTMLAnchorElement.prototype.click = origClick;
+        };
+
+        try {
+          const btn = document.querySelector('.lti-recording-item-play-media')
+                   || document.querySelector('[class*="play-media"]')
+                   || document.querySelector('[title="Play"]')
+                   || document.querySelector('[aria-label*="play" i][role="button"]');
+          if (!btn) { restore(); return { error: 'play button not found', captured: [] }; }
+          btn.click();
+          // Wait for async window.open call (Zoom may call an API first)
+          await new Promise(r => setTimeout(r, 2500));
+          restore();
+          return { captured };
+        } catch (e) {
+          restore();
+          return { error: String(e), captured };
+        }
+      },
+    });
+    const all = new Set();
+    for (const r of results) {
+      if (r?.result?.captured) for (const u of r.result.captured) if (u) all.add(u);
+    }
+    return [...all];
+  } catch {
+    return [];
+  }
 }
 
 // Wait until the recordings table reappears with rows.
