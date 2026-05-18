@@ -174,12 +174,12 @@ $('scan').addEventListener('click', async () => {
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
       setStatus('סורק קורסים...');
-      const res = await fetch(tab.url, { credentials: 'include' });
-      const html = await res.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      const courses = extractCourses(doc);
+      // Moodle 4.x's "My Courses" page renders the cards via JS after page
+      // load, so fetching the URL fresh returns an empty skeleton. Read the
+      // live DOM from the active tab instead.
+      const courses = await scanCoursesInActiveTab(tab.id);
       if (!courses.length) {
-        setStatus('לא נמצאו קורסים בדף.');
+        setStatus('לא נמצאו קורסים. גלול מטה כדי שכל הקורסים יטענו ונסה שוב.');
         $('scan').disabled = false;
         return;
       }
@@ -212,6 +212,85 @@ async function scanCourse(courseUrl) {
   data.courseUrl = courseUrl;
   data.prevSeen = await loadSeen(data.courseId);
   return data;
+}
+
+// Reads the live DOM from the active tab (so we see JS-rendered course cards).
+// Polls until the course count is stable for ~1s, then returns the list.
+async function scanCoursesInActiveTab(tabId) {
+  let lastCount = -1, stable = 0;
+  const start = Date.now();
+  while (Date.now() - start < 6000) {
+    let courses = [];
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const out = [];
+          const seen = new Set();
+          for (const a of document.querySelectorAll('a[href*="/course/view.php?id="]')) {
+            const m = a.href.match(/[?&]id=(\d+)/);
+            if (!m) continue;
+            const id = m[1];
+            if (seen.has(id)) continue;
+            // Try multiple selectors used by Moodle 3.x / 4.x course cards.
+            const nameCandidates = [
+              a.querySelector('.coursename .multiline')?.textContent,
+              a.querySelector('.coursename')?.textContent,
+              a.querySelector('.course-info-container .coursename')?.textContent,
+              a.querySelector('.text-truncate')?.textContent,
+              a.querySelector('[aria-label]')?.getAttribute('aria-label'),
+              a.getAttribute('aria-label'),
+              a.title,
+              a.textContent,
+            ];
+            const text = (nameCandidates.find(s => s && s.trim()) || '').trim();
+            if (!text) continue;
+            // Filter obvious non-course links (e.g. "View more", "More info")
+            if (/^(view|more|פרטים|מידע נוסף|הצג עוד)$/i.test(text)) continue;
+            seen.add(id);
+            out.push({ id, name: text.replace(/\s+/g, ' '), url: a.href });
+          }
+          return out;
+        },
+      });
+      courses = result || [];
+    } catch {}
+    if (courses.length === lastCount && courses.length > 0) {
+      stable += 500;
+      if (stable >= 1000) return courses;
+    } else {
+      stable = 0;
+    }
+    lastCount = courses.length;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  // Final attempt — return whatever we have even if not "stable"
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const out = [];
+        const seen = new Set();
+        for (const a of document.querySelectorAll('a[href*="/course/view.php?id="]')) {
+          const m = a.href.match(/[?&]id=(\d+)/);
+          if (!m || seen.has(m[1])) continue;
+          const text = (
+            a.querySelector('.coursename')?.textContent ||
+            a.getAttribute('aria-label') ||
+            a.title ||
+            a.textContent || ''
+          ).trim();
+          if (!text) continue;
+          seen.add(m[1]);
+          out.push({ id: m[1], name: text.replace(/\s+/g, ' '), url: a.href });
+        }
+        return out;
+      },
+    });
+    return result || [];
+  } catch {
+    return [];
+  }
 }
 
 // ========== Extraction (works on any Document) ==========
