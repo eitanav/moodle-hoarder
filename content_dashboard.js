@@ -17,23 +17,30 @@
       margin: 0 8px;
       vertical-align: middle;
     }
+    /* Moodle-Bootstrap-style primary button — blue, rounded, text label */
     .mh-btn {
-      background: transparent;
-      border: 1px solid rgba(220, 40, 103, 0.45);
-      color: #c83264;
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
+      background: #0f6cbf;
+      color: white;
+      border: 1px solid #0f6cbf;
+      border-radius: 6px;
+      padding: 3px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.4;
       cursor: pointer;
-      font-size: 14px;
-      line-height: 1;
-      padding: 0;
-      transition: background 0.15s, transform 0.1s;
-      font-family: 'Segoe UI', Arial, sans-serif;
+      transition: background 0.15s, border-color 0.15s;
+      font-family: inherit;
+      white-space: nowrap;
+      vertical-align: baseline;
     }
-    .mh-btn:hover { background: rgba(220, 40, 103, 0.1); transform: scale(1.1); }
-    .mh-btn-unhide { border-color: rgba(20, 150, 50, 0.5); color: #1b5e20; }
-    .mh-btn-unhide:hover { background: rgba(20, 150, 50, 0.1); }
+    .mh-btn:hover { background: #0a4f8a; border-color: #0a4f8a; }
+    .mh-btn:focus { outline: 2px solid #5c9eff; outline-offset: 1px; }
+
+    .mh-btn-unhide {
+      background: #2e7d32;
+      border-color: #2e7d32;
+    }
+    .mh-btn-unhide:hover { background: #1b5e20; border-color: #1b5e20; }
 
     .mh-row-truly-hidden { display: none !important; }
     .mh-row-revealed {
@@ -122,6 +129,32 @@
     return [];
   }
 
+  // Walk up from the matched row until we find a wrapper that no longer
+  // contains "another event next to us". That wrapper is the chunk we
+  // should hide — Moodle 4.x typically wraps a single event together with
+  // its date label, so hiding the wrapper makes the date vanish too.
+  function getRowContainer(row) {
+    let current = row;
+    while (current.parentElement && current.parentElement.tagName !== 'BODY') {
+      const parent = current.parentElement;
+      const siblings = parent.querySelectorAll(
+        '[data-region="event-list-item"], [data-region="dashboard-timeline-event"],' +
+        ' [data-region="upcoming-event-list-item"], .event-list-item, .timeline-event-list-item'
+      );
+      // If parent contains ONLY this event, hide the parent (so the date label
+      // attached to the day wrapper hides too). Stop as soon as a parent
+      // contains another sibling event — we don't want to nuke unrelated rows.
+      if (siblings.length === 1 && siblings[0] === row) {
+        current = parent;
+      } else {
+        break;
+      }
+      // Safety: don't go above the timeline block itself.
+      if (current.matches('[data-block="timeline"], .block_timeline, [data-region="timeline-events"]')) break;
+    }
+    return current;
+  }
+
   function findTimelineHost() {
     return document.querySelector('[data-block="timeline"]')
         || document.querySelector('.block_timeline')
@@ -149,7 +182,7 @@
     const btn = document.createElement('button');
     btn.className = 'mh-btn mh-hide-btn';
     btn.type = 'button';
-    btn.textContent = '×';
+    btn.textContent = 'הסתר';
     btn.title = 'הסתר מטלה זו (Moodle Hoarder)';
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -172,27 +205,31 @@
       const id = row.dataset.mhId || getDeadlineId(row);
       const isHidden = hidden.has(id);
       const btn = row.querySelector('.mh-hide-btn, .mh-btn-unhide');
+      // Hide the container (which usually includes the date label too),
+      // not just the row. Even when revealing, toggle classes on the
+      // SAME container so the toggle bar's "הצג מוסתרות" actually flips state.
+      const container = getRowContainer(row);
 
       if (isHidden) {
         if (showHidden) {
-          row.classList.add('mh-row-revealed');
-          row.classList.remove('mh-row-truly-hidden');
+          container.classList.add('mh-row-revealed');
+          container.classList.remove('mh-row-truly-hidden');
           if (btn) {
             btn.classList.remove('mh-hide-btn');
             btn.classList.add('mh-btn-unhide');
-            btn.textContent = '↺';
-            btn.title = 'בטל הסתרה';
+            btn.textContent = 'החזר';
+            btn.title = 'החזר מטלה זו לרשימה';
           }
         } else {
-          row.classList.add('mh-row-truly-hidden');
-          row.classList.remove('mh-row-revealed');
+          container.classList.add('mh-row-truly-hidden');
+          container.classList.remove('mh-row-revealed');
         }
       } else {
-        row.classList.remove('mh-row-revealed', 'mh-row-truly-hidden');
+        container.classList.remove('mh-row-revealed', 'mh-row-truly-hidden');
         if (btn) {
           btn.classList.remove('mh-btn-unhide');
           btn.classList.add('mh-hide-btn');
-          btn.textContent = '×';
+          btn.textContent = 'הסתר';
           btn.title = 'הסתר מטלה זו (Moodle Hoarder)';
         }
       }
