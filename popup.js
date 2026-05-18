@@ -1254,52 +1254,115 @@ function extractAssignDue(doc) {
 }
 
 async function fetchUrlActivity(item) {
-  const res = await fetch(item.url, { credentials: 'include' });
-  const html = await res.text();
+  // Step 1: hit mod/url/view.php with redirect=1 so Moodle follows its own
+  // workaround and either delivers the file content directly or 302s us to
+  // the external URL. We follow all redirects automatically.
+  const moodleUrl = item.url + (item.url.includes('?') ? '&' : '?') + 'redirect=1';
+  let res, finalUrl, ct, cd;
+  try {
+    res = await fetch(moodleUrl, { credentials: 'include', redirect: 'follow' });
+    finalUrl = res.url || item.url;
+    ct = (res.headers.get('Content-Type') || '').toLowerCase();
+    cd = (res.headers.get('Content-Disposition') || '').toLowerCase();
+  } catch {
+    return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
+  }
+
+  // Fast path #1: response is already a file (PDF/Office/binary)
+  if (isFileResponse(ct, cd, finalUrl)) {
+    try {
+      const blob = await res.blob();
+      const fn = filenameFromResponse(res)
+              || (sanitizeFilename(item.name) + (extFromCT(ct) || extFromUrl(finalUrl) || ''));
+      return [{ path: fn, blob }];
+    } catch {}
+  }
+
+  // Otherwise it's HTML — could be Moodle's "click here" workaround or the
+  // actual external page.
+  let html = '';
+  try { html = await res.text(); } catch {}
   const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Step 2: extract the external URL
   let external = doc.querySelector('a.urlworkaround')?.href
               || doc.querySelector('.urlworkaround a')?.href
               || doc.querySelector('main a[href^="http"]:not([href*="moodlearn"])')?.href;
   if (!external) {
-    // meta refresh / inline JS redirect
-    const m = html.match(/url\s*=\s*['"](https?:[^'"]+)['"]/i);
-    if (m) external = m[1];
+    const m = html.match(/url\s*=\s*['"](https?:[^'"]+)['"]/i)
+           || html.match(/window\.location(?:\.href)?\s*=\s*['"](https?:[^'"]+)['"]/i)
+           || html.match(/<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"';]+)/i);
+    if (m) external = m[1].trim();
   }
-  if (!external) {
-    return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
-  }
+  // If we got redirected to a non-Moodle URL but never found an external link,
+  // use the final URL as the external.
+  if (!external && finalUrl && !finalUrl.includes('moodlearn')) external = finalUrl;
+  if (!external) return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
 
-  // Streaming/recording → save as recording link only
+  // Step 3: classify
   if (isStreamingUrl(external)) {
     return [{ kind: 'recording', type: 'recording', name: item.name, url: external }];
   }
-
-  // Only attempt to download from hosts in our manifest permissions (Ariel domains).
-  // Anything else would CORS-fail and pollute the extension error log; save as link.
   if (!isAllowedHost(external)) {
     return [{ kind: 'link', type: 'url', name: item.name, url: external }];
   }
 
-  // Try fetching the external URL: if it answers with a file (Content-Disposition or
-  // Content-Type non-HTML), save the bytes. This is the syllabus fast-path.
+  // Step 4: fetch the external URL. Be aggressive — if it's a file, save it;
+  // if it's an HTML page that contains a direct download link to a PDF/Office
+  // file, follow that one level deeper.
   try {
-    const r = await fetch(external, { credentials: 'include' });
+    const r = await fetch(external, { credentials: 'include', redirect: 'follow' });
     if (r.ok) {
-      const ct = (r.headers.get('Content-Type') || '').toLowerCase();
-      const cd = (r.headers.get('Content-Disposition') || '').toLowerCase();
-      const isAttachment = cd.includes('attachment') || /filename/i.test(cd);
-      const fileyCT = /pdf|octet-stream|msword|officedocument|excel|powerpoint|zip|x-rar|x-7z|epub/i.test(ct);
-      const looksLikeFile = isAttachment || fileyCT || /\.(pdf|docx?|pptx?|xlsx?|zip|rar|7z|epub)(\?|#|$)/i.test(external);
-      if (looksLikeFile && !ct.includes('text/html')) {
+      const rct = (r.headers.get('Content-Type') || '').toLowerCase();
+      const rcd = (r.headers.get('Content-Disposition') || '').toLowerCase();
+      const rFinalUrl = r.url || external;
+
+      if (isFileResponse(rct, rcd, rFinalUrl)) {
         const blob = await r.blob();
         const fn = filenameFromResponse(r)
-          || (sanitizeFilename(item.name) + (extFromCT(ct) || extFromUrl(external) || ''));
+                || (sanitizeFilename(item.name) + (extFromCT(rct) || extFromUrl(rFinalUrl) || ''));
         return [{ path: fn, blob }];
+      }
+
+      // External page is HTML — look for an obvious "download this" link.
+      const externalHtml = await r.text();
+      const externalDoc = new DOMParser().parseFromString(externalHtml, 'text/html');
+      const downloadCand = externalDoc.querySelector(
+        'a[download], a[href*=".pdf" i], a[href*=".docx" i], a[href*=".pptx" i],'
+        + ' a[href*="forcedownload" i], a[href*="getfile" i], a[href*="syllabus" i]'
+      );
+      if (downloadCand) {
+        const downloadUrl = new URL(downloadCand.getAttribute('href'), rFinalUrl).href;
+        if (isAllowedHost(downloadUrl)) {
+          try {
+            const dr = await fetch(downloadUrl, { credentials: 'include', redirect: 'follow' });
+            if (dr.ok) {
+              const dct = (dr.headers.get('Content-Type') || '').toLowerCase();
+              const dcd = (dr.headers.get('Content-Disposition') || '').toLowerCase();
+              if (isFileResponse(dct, dcd, dr.url || downloadUrl)) {
+                const blob = await dr.blob();
+                const fn = filenameFromResponse(dr)
+                        || (sanitizeFilename(item.name) + (extFromCT(dct) || extFromUrl(downloadUrl) || ''));
+                return [{ path: fn, blob }];
+              }
+            }
+          } catch {}
+        }
       }
     }
   } catch {}
 
   return [{ kind: 'link', type: 'url', name: item.name, url: external }];
+}
+
+// Heuristic: does this response look like a downloadable file rather than HTML?
+function isFileResponse(ct, cd, url) {
+  if (ct.includes('text/html') || ct.includes('text/plain')) return false;
+  if (cd.includes('attachment')) return true;
+  if (/filename/i.test(cd)) return true;
+  if (/pdf|octet-stream|msword|officedocument|excel|powerpoint|zip|x-rar|x-7z|epub|image\/|video\/|audio\//i.test(ct)) return true;
+  if (/\.(pdf|docx?|pptx?|xlsx?|zip|rar|7z|epub|jpg|jpeg|png|gif|svg|mp3|mp4|mkv|mov)(\?|#|$)/i.test(url || '')) return true;
+  return false;
 }
 
 async function fetchPage(item) {
@@ -2008,10 +2071,13 @@ async function clickRecordingRow(tabId, rowIdx) {
   } catch { return false; }
 }
 
-// Poll until any zoom recording URL appears on the page, or timeout.
-// Broad matching: any zoom URL with rec|recording, any target=_blank link,
-// any data-* attribute carrying a zoom URL.
-async function waitForDetailPage(tabId, timeoutMs = 8000) {
+// Wait until the recording detail page is rendered (the play button is there).
+// Resolves immediately once the play element shows up. Also opportunistically
+// returns any zoom URLs visible on the page (rare but possible).
+// Previously this polled for zoom URLs that never appear without clicking play,
+// so every recording wasted the full 8s timeout. Now typical resolution is
+// 600-1500ms.
+async function waitForDetailPage(tabId, timeoutMs = 6000) {
   const start = Date.now();
   let detailUrl = '';
   while (Date.now() - start < timeoutMs) {
@@ -2019,61 +2085,34 @@ async function waitForDetailPage(tabId, timeoutMs = 8000) {
       const results = await chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: () => {
+          // Primary signal: the play button is rendered.
+          const playReady = !!document.querySelector(
+            '.lti-recording-item-play-media, [class*="play-media"], [title="Play"], [aria-label*="play" i][role="button"]'
+          );
+          if (!playReady) return null;
+          // Opportunistic passive URL scrape — these rarely exist on detail
+          // before play is clicked, but if they do we save a click.
           const REC_RE = /https?:\/\/[^\s"'<>]*zoom\.us\/[^\s"'<>?#]*(?:rec|recording)\/[^\s"'<>?#]+(?:\?[^\s"'<>#]*)?/g;
           const found = new Set();
-          const isRecording = (u) => /zoom\.us\/(?:rec|recording)\//.test(u) || /\/recording\/(?:play|share|detail)/i.test(u);
-
-          // Anchors with a recording-shaped href
           for (const a of document.querySelectorAll('a[href]')) {
-            const href = a.href || '';
-            if (isRecording(href)) found.add(href);
+            if (/zoom\.us\/(?:rec|recording)\//.test(a.href)) found.add(a.href);
           }
-          // Anchors that open in a new tab — Zoom uses these for play/download
-          for (const a of document.querySelectorAll('a[target="_blank"][href]')) {
-            const href = a.href || '';
-            if (!href || href.startsWith('javascript:') || href.endsWith('#')) continue;
-            // Tag with marker so we can spot in output
-            if (/zoom\.us/.test(href) || /recording/i.test(href)) found.add(href);
-            else found.add('[blank] ' + href);
-          }
-          // Input / textarea values (Zoom shows share URL in copyable input)
           for (const el of document.querySelectorAll('input, textarea')) {
             const v = (el.value ?? '').toString();
             const ms = v.match(REC_RE);
             if (ms) ms.forEach(u => found.add(u));
           }
-          // Visible body text
-          const txt = (document.body && document.body.innerText) || '';
-          const tm = txt.match(REC_RE);
-          if (tm) tm.forEach(u => found.add(u));
-          // Any data-* attribute carrying a recording URL
-          for (const el of document.querySelectorAll('*')) {
-            for (const attr of el.attributes || []) {
-              if (!attr.name.startsWith('data-')) continue;
-              const v = attr.value || '';
-              if (isRecording(v)) {
-                found.add(v.startsWith('http') ? v : ('https:' + (v.startsWith('//') ? v : '//' + v.replace(/^\/+/, ''))));
-              }
-            }
-          }
-          // onclick handlers (as strings) with embedded URLs
-          for (const el of document.querySelectorAll('[onclick]')) {
-            const oc = el.getAttribute('onclick') || '';
-            const ms = oc.match(REC_RE);
-            if (ms) ms.forEach(u => found.add(u));
-          }
           return { url: location.href, urls: [...found] };
         },
       });
-      const all = new Set();
-      for (const r of results) {
-        if (!r?.result) continue;
-        if (r.result.url && !detailUrl) detailUrl = r.result.url;
-        for (const u of r.result.urls) all.add(u);
+      const hit = results.find(r => r?.result);
+      if (hit) {
+        const all = new Set();
+        for (const r of results) for (const u of (r?.result?.urls || [])) all.add(u);
+        return { url: hit.result.url, urls: [...all] };
       }
-      if (all.size > 0) return { url: detailUrl, urls: [...all] };
     } catch {}
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 200));
   }
   return { url: detailUrl, urls: [] };
 }
@@ -2127,7 +2166,7 @@ async function navigateBackInZoom(tabId) {
       },
     });
   } catch {}
-  await new Promise(r => setTimeout(r, 600));
+  await new Promise(r => setTimeout(r, 250));
 }
 
 // On the recording detail page, click the play button (Zoom's
@@ -2178,11 +2217,34 @@ async function clickPlayAndCaptureUrl(tabId) {
                    || document.querySelector('[title="Play"]')
                    || document.querySelector('[aria-label*="play" i][role="button"]');
           if (!btn) { restore(); return { error: 'play button not found', captured: [] }; }
-          btn.click();
-          // Wait for async window.open call (Zoom may call an API first)
-          await new Promise(r => setTimeout(r, 2500));
-          restore();
-          return { captured };
+
+          // Race: resolve as soon as window.open fires (with a short grace
+          // period to catch any follow-up calls), otherwise fall back to a
+          // 3s hard timeout. Previously this was a fixed 2.5s wait every time.
+          const result = await new Promise((resolve) => {
+            const finish = () => { restore(); resolve({ captured }); };
+            let graceTimer = null;
+            const onCapture = () => {
+              clearTimeout(hardTimer);
+              clearTimeout(graceTimer);
+              graceTimer = setTimeout(finish, 150);
+            };
+            const wrappedOpen = window.open;
+            window.open = function (url) {
+              const r = wrappedOpen.apply(this, arguments);
+              onCapture();
+              return r;
+            };
+            const wrappedClick = HTMLAnchorElement.prototype.click;
+            HTMLAnchorElement.prototype.click = function () {
+              const r = wrappedClick.apply(this, arguments);
+              if (this.href && this.target === '_blank') onCapture();
+              return r;
+            };
+            const hardTimer = setTimeout(finish, 3000);
+            btn.click();
+          });
+          return result;
         } catch (e) {
           restore();
           return { error: String(e), captured };
@@ -2199,8 +2261,9 @@ async function clickPlayAndCaptureUrl(tabId) {
   }
 }
 
-// Wait until the recordings table reappears with rows.
-async function waitForListPage(tabId, timeoutMs = 6000) {
+// Wait until the recordings table reappears with rows. Polling tightened
+// to 200ms / 100ms settle from 400ms / 300ms — typical recovery is <500ms.
+async function waitForListPage(tabId, timeoutMs = 4000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -2217,11 +2280,11 @@ async function waitForListPage(tabId, timeoutMs = 6000) {
         },
       });
       if (results.some(r => r?.result === true)) {
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 100));
         return true;
       }
     } catch {}
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 200));
   }
   return false;
 }
