@@ -199,8 +199,10 @@
       if (hidden.has(id)) hidden.delete(id);
       else hidden.add(id);
       await saveHidden();
-      applyVisibility();
-      renderToggleBar();
+      withSuppressedObserver(() => {
+        applyVisibility();
+        updateBar();
+      });
     });
 
     const wrap = document.createElement('span');
@@ -247,30 +249,25 @@
     }
   }
 
-  function renderToggleBar() {
-    let bar = document.getElementById('mh-hidden-toggle-bar');
+  // The bar element is built ONCE; subsequent renders only update text on
+  // existing elements (no innerHTML = '' destruction, no rebuild). This is
+  // critical because the MutationObserver we use to catch Moodle re-renders
+  // would otherwise fire on every rebuild and trigger an infinite re-render
+  // loop — that's the flickering / multi-click-needed bug the user reported.
+  let barRefs = null;
+
+  function ensureToggleBar() {
+    if (barRefs && document.contains(barRefs.bar)) return barRefs;
     const host = findTimelineHost();
+    if (!host) return null;
 
-    if (hidden.size === 0) {
-      if (bar) bar.remove();
-      showHidden = false;
-      return;
-    }
-    if (!host) return;
+    const bar = document.createElement('div');
+    bar.id = 'mh-hidden-toggle-bar';
+    bar.className = 'mh-toggle-bar';
 
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'mh-hidden-toggle-bar';
-      bar.className = 'mh-toggle-bar';
-      const eventList = host.querySelector('[data-region="event-list-content"], [data-region="timeline-events"]');
-      if (eventList) eventList.parentElement.insertBefore(bar, eventList);
-      else host.insertBefore(bar, host.firstChild);
-    }
-
-    bar.innerHTML = '';
     const label = document.createElement('span');
-    label.textContent = `${hidden.size} מטלות מוסתרות`;
     bar.appendChild(label);
+
     const spacer = document.createElement('span');
     spacer.style.flex = '1';
     bar.appendChild(spacer);
@@ -278,33 +275,88 @@
     const showBtn = document.createElement('button');
     showBtn.type = 'button';
     showBtn.className = 'mh-bar-btn';
-    showBtn.textContent = showHidden ? 'הסתר שוב' : 'הצג מוסתרות';
     showBtn.addEventListener('click', () => {
       showHidden = !showHidden;
-      applyVisibility();
-      // Re-render bar AFTER the click event finishes, so destroying the
-      // button mid-handler doesn't confuse Chrome's event dispatch (this
-      // was the flickering the user saw).
-      setTimeout(renderToggleBar, 0);
+      withSuppressedObserver(() => {
+        applyVisibility();
+        updateBar();
+      });
     });
     bar.appendChild(showBtn);
 
-    // No more "בטל הכל" bulk-undo button. Per-item ↺ (החזר) buttons appear
-    // automatically when showHidden is on, so the user undoes selectively.
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'mh-bar-btn';
+    clearBtn.textContent = 'בטל הכל';
+    clearBtn.title = 'החזר את כל המטלות המוסתרות לרשימה';
+    clearBtn.addEventListener('click', async () => {
+      if (hidden.size === 0) return;
+      if (!confirm(`להחזיר את כל ${hidden.size} המטלות המוסתרות לרשימה?`)) return;
+      hidden.clear();
+      await saveHidden();
+      showHidden = false;
+      withSuppressedObserver(() => {
+        applyVisibility();
+        updateBar();
+      });
+    });
+    bar.appendChild(clearBtn);
+
+    // Insert into the timeline block.
+    const eventList = host.querySelector('[data-region="event-list-content"], [data-region="timeline-events"]');
+    if (eventList) eventList.parentElement.insertBefore(bar, eventList);
+    else host.insertBefore(bar, host.firstChild);
+
+    barRefs = { bar, label, showBtn, clearBtn };
+    return barRefs;
   }
 
-  // ---- main loop ----
-  function process() {
-    const rows = findDeadlineRows();
-    rows.forEach(applyRow);
-    applyVisibility();
-    renderToggleBar();
+  function updateBar() {
+    if (hidden.size === 0) {
+      if (barRefs?.bar) {
+        barRefs.bar.remove();
+        barRefs = null;
+      }
+      showHidden = false;
+      return;
+    }
+    const refs = ensureToggleBar();
+    if (!refs) return;
+    refs.label.textContent = `${hidden.size} מטלות מוסתרות`;
+    refs.showBtn.textContent = showHidden ? 'הסתר שוב' : 'הצג מוסתרות';
   }
 
+  // ---- main loop + mutation-observer suppression ----
+  // Each renderToggleBar / applyRow modifies the DOM, which retriggers the
+  // observer that called us. Without suppression, that's an infinite loop
+  // and that's what the user saw as "the button flickers on hover and needs
+  // multiple clicks". A simple ref-counted flag stops scheduleProcess()
+  // while we're touching the DOM ourselves.
+  let suppressCount = 0;
   let scheduleTimer = null;
+
+  function withSuppressedObserver(fn) {
+    suppressCount++;
+    try { fn(); } finally {
+      // Defer the decrement — the MutationObserver fires asynchronously,
+      // so any callbacks queued by our DOM updates need to be skipped too.
+      setTimeout(() => { if (suppressCount > 0) suppressCount--; }, 60);
+    }
+  }
+
   function scheduleProcess() {
+    if (suppressCount > 0) return;
     clearTimeout(scheduleTimer);
     scheduleTimer = setTimeout(process, 120);
+  }
+
+  function process() {
+    withSuppressedObserver(() => {
+      const rows = findDeadlineRows();
+      rows.forEach(applyRow);
+      applyVisibility();
+      updateBar();
+    });
   }
 
   async function init() {
@@ -318,8 +370,10 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes[STORAGE_KEY]) {
         hidden = new Set(changes[STORAGE_KEY].newValue || []);
-        applyVisibility();
-        renderToggleBar();
+        withSuppressedObserver(() => {
+          applyVisibility();
+          updateBar();
+        });
       }
     });
   }
