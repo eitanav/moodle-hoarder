@@ -50,17 +50,21 @@ function bindText(input, key, settings) {
   });
 }
 
-function bindRadios(container, key, settings) {
+function bindRadios(container, key, settings, onChange) {
   const value = settings[key];
   for (const label of container.querySelectorAll('label')) {
     const radio = label.querySelector('input[type="radio"]');
     if (radio.value === value) label.classList.add('active');
     radio.checked = radio.value === value;
-    label.addEventListener('click', async () => {
+    label.addEventListener('click', async (e) => {
+      e.preventDefault();
       container.querySelectorAll('label').forEach(l => l.classList.remove('active'));
       label.classList.add('active');
       radio.checked = true;
       await updateSetting(key, radio.value);
+      // Live side-effect (e.g. apply theme immediately) BEFORE flashSaved so
+      // the toast doesn't appear on the still-old background.
+      if (typeof onChange === 'function') onChange(radio.value);
       flashSaved();
     });
   }
@@ -130,12 +134,6 @@ function escapeHtml(s) {
   const settings = await getSettings();
   applyTheme(settings.theme);
 
-  // Re-apply theme whenever the theme radio changes (binders below trigger
-  // saveSettings; this catches the visual feedback before page reload).
-  document.querySelectorAll('.radios[data-setting="theme"] input').forEach(r => {
-    r.addEventListener('change', () => applyTheme(r.value));
-  });
-
   // toggles
   for (const input of $$('input.toggle')) {
     const key = input.dataset.setting;
@@ -145,9 +143,13 @@ function escapeHtml(s) {
   for (const input of $$('input[type="text"][data-setting]')) {
     bindText(input, input.dataset.setting, settings);
   }
-  // radio groups
+  // radio groups — theme gets a live applyTheme callback so the page
+  // re-themes instantly (no reload, no relying on radio change events
+  // which don't always fire on display:none inputs).
   for (const wrap of $$('.radios[data-setting]')) {
-    bindRadios(wrap, wrap.dataset.setting, settings);
+    const key = wrap.dataset.setting;
+    const onChange = key === 'theme' ? applyTheme : null;
+    bindRadios(wrap, key, settings, onChange);
   }
 
   renderFileTypes(settings);

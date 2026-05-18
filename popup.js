@@ -22,6 +22,7 @@ const diffText      = $('diffText');
 let scanned = null;        // single course: { courseName, courseId, courseUrl, sections, prevSeen }
 let multiScanned = null;   // multi: { courses: [{id, name, url}] }
 let zoomScanned = null;    // zoom: { data: { recordings, pages, pageUrl }, tabId }
+let deadlinesScanned = null; // dashboard: { deadlines: [...], tabId }
 
 // ---------- Constants ----------
 const ACTIVITY_RE = /\/mod\/(resource|folder|assign|url|page|book|forum|quiz|lesson|choice|feedback|workshop|wiki|chat|glossary|scorm|h5pactivity)\/view\.php\?(?:[^#]*&)?id=(\d+)/;
@@ -69,6 +70,8 @@ function showView(name) {
   multiView.style.display   = name === 'multi'   ? 'block' : 'none';
   const zoomView = document.getElementById('zoomPicker');
   if (zoomView) zoomView.style.display = name === 'zoom' ? 'block' : 'none';
+  const dlView = document.getElementById('deadlinesView');
+  if (dlView) dlView.style.display = name === 'deadlines' ? 'block' : 'none';
 }
 
 // Settings button opens the options page in a new tab.
@@ -172,7 +175,7 @@ $('scan').addEventListener('click', async () => {
       zoomScanned = { data, tabId: tab.id };
       renderZoomPicker();
       return;
-    } else if (/moodlearn\.ariel\.ac\.il\/my\/(courses\.php|index\.php)/.test(tab.url)) {
+    } else if (/moodlearn\.ariel\.ac\.il\/my\/courses\.php/.test(tab.url)) {
       setStatus('סורק קורסים...');
       // Moodle 4.x's "My Courses" page renders the cards via JS after page
       // load, so fetching the URL fresh returns an empty skeleton. Read the
@@ -185,6 +188,19 @@ $('scan').addEventListener('click', async () => {
       }
       multiScanned = { courses };
       renderMulti();
+    } else if (/moodlearn\.ariel\.ac\.il\/my\/?(?:[?#]|$|index\.php)/.test(tab.url)) {
+      // Dashboard: scan deadlines from the timeline panel
+      setStatus('סורק דדליינים...');
+      const deadlines = await scanDeadlinesInActiveTab(tab.id);
+      if (!deadlines.length) {
+        setStatus('לא נמצאו מטלות. ודא שטעון "ממתין לביצוע" ונסה שוב.');
+        $('scan').disabled = false;
+        return;
+      }
+      const annotated = await annotateDeadlines(deadlines);
+      deadlinesScanned = { deadlines: annotated, tabId: tab.id };
+      renderDeadlines();
+      return;
     } else if (/moodlearn\.ariel\.ac\.il\/course\/view\.php/.test(tab.url)) {
       setStatus('סורק קורס...');
       scanned = await scanCourse(tab.url);
@@ -2338,3 +2354,234 @@ function rowsToCsv(rows) {
   };
   return '﻿' + rows.map(r => r.map(esc).join(',')).join('\r\n');
 }
+
+// ===================== Dashboard deadlines =====================
+// On moodlearn.ariel.ac.il/my/, reads the "ממתין לביצוע" timeline rows from
+// the live tab, cross-references the hidden set used by content_dashboard.js,
+// compares with the previous snapshot to mark new/updated items, and renders
+// a picker + ICS export.
+
+async function scanDeadlinesInActiveTab(tabId) {
+  // Wait briefly for the timeline cards to settle in case the page is still
+  // hydrating when the popup opens.
+  let last = -1, stable = 0;
+  const start = Date.now();
+  while (Date.now() - start < 4000) {
+    let count = 0;
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => document.querySelectorAll(
+          '[data-region="event-list-item"], [data-region="dashboard-timeline-event"],' +
+          ' [data-region="upcoming-event-list-item"], .event-list-item, .timeline-event-list-item'
+        ).length,
+      });
+      count = results[0]?.result || 0;
+    } catch {}
+    if (count === last && count > 0) {
+      stable += 400;
+      if (stable >= 800) break;
+    } else stable = 0;
+    last = count;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  // Now extract.
+  let extracted = [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractDeadlinesFromPage,
+    });
+    extracted = results[0]?.result || [];
+  } catch {}
+  return extracted;
+}
+
+// Runs IN PAGE CONTEXT. Pulls each timeline row's id, title, course,
+// due timestamp, and late flag.
+function extractDeadlinesFromPage() {
+  const out = [];
+  const selectors = [
+    '[data-region="event-list-item"]',
+    '[data-region="dashboard-timeline-event"]',
+    '[data-region="upcoming-event-list-item"]',
+    '.event-list-item',
+    '.timeline-event-list-item',
+  ];
+  let rows = [];
+  for (const sel of selectors) {
+    rows = document.querySelectorAll(sel);
+    if (rows.length) break;
+  }
+  for (const row of rows) {
+    const link = row.querySelector('a[href*="/mod/"]');
+    let id = '';
+    if (link?.href) {
+      const m = link.href.match(/\/mod\/([a-z0-9_-]+)\/view\.php\?(?:[^#]*&)?id=(\d+)/i);
+      id = m ? `${m[1]}:${m[2]}` : link.href.split('#')[0];
+    } else {
+      const titleEl = row.querySelector('h3, h4, h5, [class*="event-name"], [class*="event-title"]');
+      id = 'text:' + (titleEl?.textContent || row.textContent || '').trim().slice(0, 80);
+    }
+
+    const titleEl = row.querySelector('h3, h4, h5, .event-name, [class*="event-name"], [class*="event-title"]');
+    const title = (titleEl?.textContent || link?.textContent || row.textContent || '')
+      .replace(/\s+/g, ' ').trim();
+
+    const courseEl = row.querySelector(
+      '[data-region="event-list-content-course"], .course-name, .event-course,'
+      + ' [class*="course-name"], [class*="course-title"]'
+    );
+    const course = (courseEl?.textContent || '').replace(/\s+/g, ' ').trim();
+
+    // Try several ways to get the due timestamp.
+    let due = null;
+    const tsAttr = row.querySelector('[data-timestamp]');
+    if (tsAttr?.dataset?.timestamp) due = +tsAttr.dataset.timestamp * 1000;
+    if (!due) {
+      const timeEl = row.querySelector('time[datetime]');
+      if (timeEl?.dateTime) {
+        const t = new Date(timeEl.dateTime).getTime();
+        if (!isNaN(t)) due = t;
+      }
+    }
+    if (!due) {
+      // Look for visible "DD/MM/YYYY" and "HH:MM" in the row text.
+      const text = row.textContent || '';
+      const dateM = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      const timeM = text.match(/(\d{1,2}):(\d{2})/);
+      if (dateM) {
+        const day = +dateM[1], month = +dateM[2] - 1, year = +dateM[3];
+        const hour = timeM ? +timeM[1] : 23;
+        const min  = timeM ? +timeM[2] : 59;
+        due = new Date(year, month, day, hour, min).getTime();
+      }
+    }
+
+    const late = /באיחור|overdue|late/i.test(row.textContent || '');
+
+    out.push({
+      id, title, course, due, late,
+      url: link?.href || '',
+    });
+  }
+  return out;
+}
+
+// Cross-reference the user's "hidden" set + previous snapshot to attach
+// status flags: { kind: 'late'|'thisWeek'|'future', change: 'new'|'updated'|null }.
+async function annotateDeadlines(deadlines) {
+  const stored = await chrome.storage.local.get(['hiddenDeadlines', 'deadlinesSnapshot']);
+  const hidden = new Set(stored.hiddenDeadlines || []);
+  const prev = stored.deadlinesSnapshot?.deadlines || [];
+  const prevMap = new Map(prev.map(d => [d.id, d]));
+  const now = Date.now();
+  const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
+
+  const visible = deadlines.filter(d => !hidden.has(d.id));
+
+  for (const d of visible) {
+    if (d.late || (d.due && d.due < now)) d.kind = 'late';
+    else if (d.due && d.due <= weekFromNow) d.kind = 'thisWeek';
+    else d.kind = 'future';
+
+    const pv = prevMap.get(d.id);
+    if (!pv) d.change = 'new';
+    else if (pv.due !== d.due) d.change = 'updated';
+    else d.change = null;
+  }
+  return visible;
+}
+
+function renderDeadlines() {
+  showView('deadlines');
+  const listEl = document.getElementById('deadlinesList');
+  listEl.innerHTML = '';
+
+  // Sort: late first, then this-week, then future (ascending by due within group)
+  const order = { late: 0, thisWeek: 1, future: 2 };
+  const sorted = [...deadlinesScanned.deadlines]
+    .sort((a, b) => (order[a.kind] - order[b.kind]) || ((a.due || 0) - (b.due || 0)));
+
+  const summary = document.getElementById('deadlinesSummary');
+  const late = sorted.filter(d => d.kind === 'late').length;
+  const week = sorted.filter(d => d.kind === 'thisWeek').length;
+  const updated = sorted.filter(d => d.change === 'updated').length;
+  const news = sorted.filter(d => d.change === 'new').length;
+  const parts = [`${sorted.length} מטלות`];
+  if (late) parts.push(`<span style="color:#b00020;font-weight:600">${late} באיחור</span>`);
+  if (week) parts.push(`<span style="color:#dc2867;font-weight:600">${week} השבוע</span>`);
+  if (news) parts.push(`<span style="color:#1b5e20">${news} חדשות</span>`);
+  if (updated) parts.push(`<span style="color:#7a4e00">${updated} עודכנו</span>`);
+  summary.innerHTML = parts.join(' · ');
+
+  for (const d of sorted) {
+    const li = document.createElement('li');
+    li.dataset.id = d.id;
+    const date = d.due ? new Date(d.due).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    const badges = [];
+    if (d.kind === 'late') badges.push(`<span class="chip" style="background:#b00020;color:white;border-radius:10px;padding:2px 8px;font-size:9px;">באיחור</span>`);
+    else if (d.kind === 'thisWeek') badges.push(`<span class="chip" style="background:#dc2867;color:white;border-radius:10px;padding:2px 8px;font-size:9px;">השבוע</span>`);
+    if (d.change === 'new') badges.push(`<span class="chip" style="background:var(--ok);color:white;border-radius:10px;padding:2px 8px;font-size:9px;">חדש</span>`);
+    if (d.change === 'updated') badges.push(`<span class="chip" style="background:var(--new-bg);color:var(--new-fg);border-radius:10px;padding:2px 8px;font-size:9px;">עודכן</span>`);
+
+    li.innerHTML = `
+      <input type="checkbox" checked>
+      <div style="flex:1;overflow:hidden;">
+        <div class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        <div class="id"></div>
+        <div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap;">${badges.join('')}</div>
+      </div>`;
+    li.querySelector('.name').textContent = d.title || '(ללא כותרת)';
+    li.querySelector('.id').textContent = `${date}${d.course ? ' · ' + d.course : ''}`;
+    listEl.appendChild(li);
+  }
+
+  document.getElementById('totDeadlines').textContent = sorted.length;
+  setStatus('');
+}
+
+document.getElementById('backDeadlines')?.addEventListener('click', () => {
+  showView('initial');
+  $('scan').disabled = false;
+  resetFooter();
+});
+
+document.getElementById('exportDeadlines')?.addEventListener('click', async () => {
+  if (!deadlinesScanned) return;
+  const listEl = document.getElementById('deadlinesList');
+  const checked = new Set(
+    [...listEl.querySelectorAll('li')]
+      .filter(li => li.querySelector('input').checked)
+      .map(li => li.dataset.id)
+  );
+  const selected = deadlinesScanned.deadlines.filter(d => checked.has(d.id) && d.due);
+  if (!selected.length) {
+    setStatus('בחר לפחות מטלה אחת עם תאריך הגשה.');
+    return;
+  }
+
+  const events = selected.map(d => ({
+    uid: `dashboard-${d.id}@moodle-hoarder`,
+    summary: d.title + (d.course ? ` (${d.course})` : ''),
+    start: new Date(d.due),
+    url: d.url,
+    description: `מטלה במודל${d.course ? ' — ' + d.course : ''}`,
+  }));
+  const ics = buildICS(events, 'Moodle deadlines');
+  const blob = new Blob(['﻿' + ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const filename = `moodle-deadlines_${new Date().toISOString().slice(0, 10)}.ics`;
+  await chrome.downloads.download({ url, filename, saveAs: !!CACHED_SETTINGS?.saveAs });
+
+  // Save snapshot for next-time "updated" comparison
+  await chrome.storage.local.set({
+    deadlinesSnapshot: {
+      date: Date.now(),
+      deadlines: deadlinesScanned.deadlines.map(d => ({ id: d.id, due: d.due })),
+    },
+  });
+
+  setStatus(`יוצאו ${selected.length} מטלות ל-ICS.`);
+  notify('Moodle Hoarder', `${selected.length} מטלות נשמרו ליומן`);
+});
