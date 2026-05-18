@@ -17,6 +17,12 @@
     --ok: #1b5e20;
     --err: #b00020;
   }
+  /* Ariel-blue accent palette */
+  :root.mh-accent-blue {
+    --accent: #003c71;
+    --accent-2: #0e72ed;
+  }
+
   /* Dark theme — applies when forced (.mh-theme-dark) OR when system prefers
      dark and no explicit theme class is on the root. */
   :root.mh-theme-dark,
@@ -260,6 +266,18 @@
         <label><input type="radio" name="theme" value="auto">אוטומטי</label>
         <label><input type="radio" name="theme" value="light">בהיר</label>
         <label><input type="radio" name="theme" value="dark">כהה</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">צבע ראשי</div>
+      <div class="hint">"כתום-ורוד" הוא הצבע הברירת-מחדל של התוסף. "כחול אריאל" מתאים לערכת הצבעים של אוניברסיטת אריאל.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="accentColor">
+        <label><input type="radio" name="accentColor" value="orange-pink">כתום-ורוד</label>
+        <label><input type="radio" name="accentColor" value="blue-ariel">כחול אריאל</label>
       </div>
     </div>
   </div>

@@ -8,5 +8,7 @@
     var t = localStorage.getItem('mh-theme');
     if (t === 'dark') document.documentElement.classList.add('mh-theme-dark');
     else if (t === 'light') document.documentElement.classList.add('mh-theme-light');
+    var a = localStorage.getItem('mh-accent');
+    if (a === 'blue-ariel') document.documentElement.classList.add('mh-accent-blue');
   } catch (e) {}
 })();

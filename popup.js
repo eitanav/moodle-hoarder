@@ -596,8 +596,10 @@ function renderPicker() {
 let CACHED_SETTINGS = null;
 async function loadCachedSettings() {
   CACHED_SETTINGS = await getSettings();
-  // Apply theme on every popup open in case the user changed it elsewhere.
+  // Apply theme + accent on every popup open in case the user changed
+  // them elsewhere.
   applyTheme(CACHED_SETTINGS.theme);
+  applyAccent(CACHED_SETTINGS.accentColor);
   return CACHED_SETTINGS;
 }
 
@@ -2508,28 +2510,38 @@ function extractDeadlinesFromPage() {
     );
     const course = (courseEl?.textContent || '').replace(/\s+/g, ' ').trim();
 
-    // Try several ways to get the due timestamp.
+    // Try several ways to get the due timestamp. The date label sometimes
+    // lives in a parent/sibling wrapper, not inside the event row itself —
+    // so we walk up the DOM up to 5 levels until we find something with
+    // a date in it (data-timestamp, <time datetime>, or visible DD/MM/YYYY).
     let due = null;
-    const tsAttr = row.querySelector('[data-timestamp]');
-    if (tsAttr?.dataset?.timestamp) due = +tsAttr.dataset.timestamp * 1000;
-    if (!due) {
-      const timeEl = row.querySelector('time[datetime]');
+    let scope = row;
+    for (let hop = 0; hop < 5 && !due; hop++) {
+      const tsAttr = scope.querySelector?.('[data-timestamp]');
+      if (tsAttr?.dataset?.timestamp) {
+        const v = +tsAttr.dataset.timestamp;
+        if (!isNaN(v) && v > 0) { due = v * 1000; break; }
+      }
+      const timeEl = scope.querySelector?.('time[datetime]');
       if (timeEl?.dateTime) {
         const t = new Date(timeEl.dateTime).getTime();
-        if (!isNaN(t)) due = t;
+        if (!isNaN(t)) { due = t; break; }
       }
-    }
-    if (!due) {
-      // Look for visible "DD/MM/YYYY" and "HH:MM" in the row text.
-      const text = row.textContent || '';
+      // Visible text — DD/MM/YYYY plus optional HH:MM
+      const text = scope.textContent || '';
       const dateM = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       const timeM = text.match(/(\d{1,2}):(\d{2})/);
       if (dateM) {
         const day = +dateM[1], month = +dateM[2] - 1, year = +dateM[3];
         const hour = timeM ? +timeM[1] : 23;
         const min  = timeM ? +timeM[2] : 59;
-        due = new Date(year, month, day, hour, min).getTime();
+        const t = new Date(year, month, day, hour, min).getTime();
+        if (!isNaN(t)) { due = t; break; }
       }
+      if (!scope.parentElement) break;
+      scope = scope.parentElement;
+      // Safety: stop before we hit the whole timeline block.
+      if (scope.matches?.('[data-block="timeline"], .block_timeline, [data-region="event-list-content"], [data-region="timeline-events"]')) break;
     }
 
     const late = /באיחור|overdue|late/i.test(row.textContent || '');

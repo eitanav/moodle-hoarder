@@ -133,6 +133,7 @@ function escapeHtml(s) {
 (async function init() {
   const settings = await getSettings();
   applyTheme(settings.theme);
+  applyAccent(settings.accentColor);
 
   // toggles
   for (const input of $$('input.toggle')) {
@@ -148,7 +149,9 @@ function escapeHtml(s) {
   // which don't always fire on display:none inputs).
   for (const wrap of $$('.radios[data-setting]')) {
     const key = wrap.dataset.setting;
-    const onChange = key === 'theme' ? applyTheme : null;
+    let onChange = null;
+    if (key === 'theme') onChange = applyTheme;
+    else if (key === 'accentColor') onChange = applyAccent;
     bindRadios(wrap, key, settings, onChange);
   }
 

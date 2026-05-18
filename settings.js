@@ -54,12 +54,17 @@ const SETTINGS_DEFAULTS = {
   // UI theme. 'auto' = follow system (prefers-color-scheme),
   // 'light' or 'dark' = force.
   theme: 'auto',
+
+  // Accent palette. 'orange-pink' = default brand colors,
+  // 'blue-ariel' = Ariel University blue.
+  accentColor: 'orange-pink',
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply
 // the right class synchronously from an inline <script>, avoiding the
 // flash of wrong theme on page open.
 const THEME_LS_KEY = 'mh-theme';
+const ACCENT_LS_KEY = 'mh-accent';
 
 async function getSettings() {
   const stored = await chrome.storage.local.get('settings');
@@ -71,11 +76,12 @@ async function getSettings() {
 
 async function saveSettings(next) {
   await chrome.storage.local.set({ settings: next });
-  // Mirror the theme to localStorage so the next popup/options page open
-  // can apply it synchronously before paint.
+  // Mirror theme and accent to localStorage so the next popup/options page
+  // open can apply them synchronously before paint.
   try {
-    if (typeof localStorage !== 'undefined' && next && next.theme) {
-      localStorage.setItem(THEME_LS_KEY, next.theme);
+    if (typeof localStorage !== 'undefined' && next) {
+      if (next.theme) localStorage.setItem(THEME_LS_KEY, next.theme);
+      if (next.accentColor) localStorage.setItem(ACCENT_LS_KEY, next.accentColor);
     }
   } catch {}
 }
@@ -89,6 +95,15 @@ function applyTheme(theme) {
   else if (theme === 'dark') root.classList.add('mh-theme-dark');
   // 'auto' or unrecognised → no class, CSS media query handles it.
   try { localStorage.setItem(THEME_LS_KEY, theme || 'auto'); } catch {}
+}
+
+// Apply the accent palette (orange-pink default, or blue-ariel).
+function applyAccent(color) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.classList.remove('mh-accent-blue');
+  if (color === 'blue-ariel') root.classList.add('mh-accent-blue');
+  try { localStorage.setItem(ACCENT_LS_KEY, color || 'orange-pink'); } catch {}
 }
 
 async function updateSetting(key, value) {
@@ -111,4 +126,5 @@ if (typeof self !== 'undefined') {
   self.updateSetting = updateSetting;
   self.resetSettings = resetSettings;
   self.applyTheme = applyTheme;
+  self.applyAccent = applyAccent;
 }

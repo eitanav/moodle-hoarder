@@ -20,6 +20,25 @@
     --new-bg: #fff3cd;
     --new-fg: #7a4e00;
   }
+  /* Ariel-blue accent palette — overrides --accent / --accent-2 when active. */
+  :root.mh-accent-blue {
+    --accent: #003c71;
+    --accent-2: #0e72ed;
+    --chip-bg: #d6e4f2;
+    --chip-fg: #003c71;
+  }
+  :root.mh-accent-blue.mh-theme-dark,
+  :root.mh-theme-dark.mh-accent-blue {
+    --chip-bg: #15314c;
+    --chip-fg: #9ec5ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root.mh-accent-blue:not(.mh-theme-light) {
+      --chip-bg: #15314c;
+      --chip-fg: #9ec5ec;
+    }
+  }
+
   /* Dark theme — applies when forced (mh-theme-dark class) OR when system
      prefers dark and no override class is set. */
   :root.mh-theme-dark,
@@ -299,11 +318,11 @@
     <div class="summary">נמצאו <span class="count" id="totDeadlines">0</span> מטלות (ללא המוסתרות).</div>
     <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
     <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
-    <div class="hint" style="margin-top:6px;">סמן אילו מטלות לכלול בקובץ ה-ICS שייוצא ליומן (Google / Outlook / Apple).</div>
+    <div class="hint" style="margin-top:6px;">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.</div>
     <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
     <div class="row-btns">
       <button class="secondary" id="backDeadlines">חזור</button>
-      <button id="exportDeadlines">ייצא ל-ICS</button>
+      <button id="exportDeadlines">ייצא ליומן</button>
     </div>
   </div>
 
