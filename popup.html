@@ -2,15 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<script>
-  // Apply theme synchronously to avoid a flash. settings.js updates this
-  // localStorage key whenever the theme setting changes.
-  try {
-    var t = localStorage.getItem('mh-theme');
-    if (t === 'dark') document.documentElement.classList.add('mh-theme-dark');
-    else if (t === 'light') document.documentElement.classList.add('mh-theme-light');
-  } catch (e) {}
-</script>
+<script src="theme-bootstrap.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -306,8 +298,9 @@
   <div id="deadlinesView" style="display:none;">
     <div class="summary">נמצאו <span class="count" id="totDeadlines">0</span> מטלות (ללא המוסתרות).</div>
     <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
-    <ul class="courses" id="deadlinesList" style="max-height:300px;"></ul>
+    <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
     <div class="hint" style="margin-top:6px;">סמן אילו מטלות לכלול בקובץ ה-ICS שייוצא ליומן (Google / Outlook / Apple).</div>
+    <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
     <div class="row-btns">
       <button class="secondary" id="backDeadlines">חזור</button>
       <button id="exportDeadlines">ייצא ל-ICS</button>

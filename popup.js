@@ -81,10 +81,93 @@ document.getElementById('openSettings')?.addEventListener('click', () => {
 });
 
 // Bootstrap: load settings into the cache before anything else runs.
+// Also auto-trigger the dashboard deadlines scan when the popup opens on
+// /my/ — the user doesn't need to press "סרוק" there; opening the popup
+// is already an explicit intent.
 (async () => {
   await loadCachedSettings();
   await refreshQueueArea();
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url && /moodlearn\.ariel\.ac\.il\/my\/?(?:[?#]|$|index\.php)/.test(tab.url)) {
+      await runDashboardScan(tab);
+    }
+  } catch {}
 })();
+
+// Dashboard scan: shared between auto-bootstrap and the manual scan button
+// (in case the auto-scan needs to be retried).
+async function runDashboardScan(tab) {
+  $('scan').disabled = true;
+  setStatus('פותח את כל הפעילויות...');
+  try {
+    await expandTimelineActivities(tab.id);
+    setStatus('סורק דדליינים...');
+    const deadlines = await scanDeadlinesInActiveTab(tab.id);
+    if (!deadlines.length) {
+      setStatus('לא נמצאו מטלות. ודא שטעון "ממתין לביצוע" ונסה שוב.');
+      $('scan').disabled = false;
+      return;
+    }
+    const annotated = await annotateDeadlines(deadlines);
+    deadlinesScanned = { deadlines: annotated, tabId: tab.id };
+    // Persist the snapshot RIGHT AWAY (not only on export) so the next visit
+    // can diff against it even if the user closes the popup without exporting.
+    await chrome.storage.local.set({
+      deadlinesSnapshot: {
+        date: Date.now(),
+        deadlines: deadlines.map(d => ({ id: d.id, due: d.due })),
+      },
+    });
+    renderDeadlines();
+  } catch (e) {
+    setStatus('שגיאה: ' + e.message);
+    $('scan').disabled = false;
+  }
+}
+
+// Click any "Show more activities" / "פעילויות נוספות" / "Load more" button
+// in the timeline so the popup sees the full list, not just the first page.
+// We keep clicking until the row count stops growing.
+async function expandTimelineActivities(tabId) {
+  for (let i = 0; i < 8; i++) {
+    let progress;
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const before = document.querySelectorAll(
+            '[data-region="event-list-item"], [data-region="dashboard-timeline-event"],' +
+            ' .event-list-item, .timeline-event-list-item'
+          ).length;
+          // Find a "show more" button.
+          const candidates = [
+            ...document.querySelectorAll('[data-region="view-more"] button'),
+            ...document.querySelectorAll('[data-action="more-events"]'),
+            ...document.querySelectorAll('button.more-events, button.see-more'),
+            ...document.querySelectorAll('button, a'),
+          ];
+          let clicked = null;
+          for (const el of candidates) {
+            const txt = (el.textContent || '').trim();
+            if (/show\s*more|view\s*more|הצג\s*עוד|פעילויות\s*נוספות|הצגת\s*פעילויות|טען\s*עוד|load\s*more/i.test(txt)) {
+              if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+              el.click();
+              clicked = txt;
+              break;
+            }
+          }
+          return { before, clicked };
+        },
+      });
+      progress = results[0]?.result;
+    } catch { break; }
+    if (!progress?.clicked) break;
+    // Give Moodle time to fetch & render the next batch
+    await new Promise(r => setTimeout(r, 700));
+  }
+}
 
 // ========== Right-click queue ==========
 const QUEUE_KEY = 'rightClickQueue';
@@ -189,17 +272,8 @@ $('scan').addEventListener('click', async () => {
       multiScanned = { courses };
       renderMulti();
     } else if (/moodlearn\.ariel\.ac\.il\/my\/?(?:[?#]|$|index\.php)/.test(tab.url)) {
-      // Dashboard: scan deadlines from the timeline panel
-      setStatus('סורק דדליינים...');
-      const deadlines = await scanDeadlinesInActiveTab(tab.id);
-      if (!deadlines.length) {
-        setStatus('לא נמצאו מטלות. ודא שטעון "ממתין לביצוע" ונסה שוב.');
-        $('scan').disabled = false;
-        return;
-      }
-      const annotated = await annotateDeadlines(deadlines);
-      deadlinesScanned = { deadlines: annotated, tabId: tab.id };
-      renderDeadlines();
+      // Manual retry of the auto-scan that runs on popup open.
+      await runDashboardScan(tab);
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/course\/view\.php/.test(tab.url)) {
       setStatus('סורק קורס...');
@@ -2481,8 +2555,9 @@ async function annotateDeadlines(deadlines) {
   const visible = deadlines.filter(d => !hidden.has(d.id));
 
   for (const d of visible) {
-    if (d.late || (d.due && d.due < now)) d.kind = 'late';
-    else if (d.due && d.due <= weekFromNow) d.kind = 'thisWeek';
+    if (!d.due) d.kind = 'unknown';
+    else if (d.late || d.due < now) d.kind = 'late';
+    else if (d.due <= weekFromNow) d.kind = 'thisWeek';
     else d.kind = 'future';
 
     const pv = prevMap.get(d.id);
@@ -2498,10 +2573,10 @@ function renderDeadlines() {
   const listEl = document.getElementById('deadlinesList');
   listEl.innerHTML = '';
 
-  // Sort: late first, then this-week, then future (ascending by due within group)
-  const order = { late: 0, thisWeek: 1, future: 2 };
+  // Sort: late first, then this-week, then future, then unknown-due last.
+  const order = { late: 0, thisWeek: 1, future: 2, unknown: 3 };
   const sorted = [...deadlinesScanned.deadlines]
-    .sort((a, b) => (order[a.kind] - order[b.kind]) || ((a.due || 0) - (b.due || 0)));
+    .sort((a, b) => (order[a.kind] - order[b.kind]) || ((a.due || Infinity) - (b.due || Infinity)));
 
   const summary = document.getElementById('deadlinesSummary');
   const late = sorted.filter(d => d.kind === 'late').length;
