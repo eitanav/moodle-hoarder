@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>Moodle Hoarder — הגדרות</title>
+<script>
+  try {
+    var t = localStorage.getItem('mh-theme');
+    if (t === 'dark') document.documentElement.classList.add('mh-theme-dark');
+    else if (t === 'light') document.documentElement.classList.add('mh-theme-light');
+  } catch (e) {}
+</script>
 <style>
   :root {
     --bg: #ffffff;
@@ -16,8 +23,20 @@
     --ok: #1b5e20;
     --err: #b00020;
   }
+  /* Dark theme — applies when forced (.mh-theme-dark) OR when system prefers
+     dark and no explicit theme class is on the root. */
+  :root.mh-theme-dark,
+  :root.mh-theme-dark body { color-scheme: dark; }
+  :root.mh-theme-dark {
+    --bg: #1a1a1a;
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+    --row: #262626;
+    --row-hover: #333;
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not(.mh-theme-light):not(.mh-theme-dark) {
       --bg: #1a1a1a;
       --fg: #f3f4f6;
       --muted: #9ca3af;
@@ -233,6 +252,24 @@
 </header>
 
 <main>
+
+<section>
+  <h2>מראה</h2>
+  <p class="desc">בהיר / כהה / לפי הגדרת מערכת ההפעלה</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">ערכת נושא</div>
+      <div class="hint">"אוטומטי" יתאם את עצמו להגדרת מצב כהה של Windows/macOS. "בהיר" / "כהה" כופים בצורה ידנית.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="theme">
+        <label><input type="radio" name="theme" value="auto">אוטומטי</label>
+        <label><input type="radio" name="theme" value="light">בהיר</label>
+        <label><input type="radio" name="theme" value="dark">כהה</label>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section>
   <h2>מבנה ה-ZIP</h2>

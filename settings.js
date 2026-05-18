@@ -50,7 +50,16 @@ const SETTINGS_DEFAULTS = {
 
   // If true, the context-menu download opens Chrome's "Save As" dialog.
   rightClickSaveAs: false,
+
+  // UI theme. 'auto' = follow system (prefers-color-scheme),
+  // 'light' or 'dark' = force.
+  theme: 'auto',
 };
+
+// Theme persists to localStorage too so the popup/options HTML can apply
+// the right class synchronously from an inline <script>, avoiding the
+// flash of wrong theme on page open.
+const THEME_LS_KEY = 'mh-theme';
 
 async function getSettings() {
   const stored = await chrome.storage.local.get('settings');
@@ -62,6 +71,24 @@ async function getSettings() {
 
 async function saveSettings(next) {
   await chrome.storage.local.set({ settings: next });
+  // Mirror the theme to localStorage so the next popup/options page open
+  // can apply it synchronously before paint.
+  try {
+    if (typeof localStorage !== 'undefined' && next && next.theme) {
+      localStorage.setItem(THEME_LS_KEY, next.theme);
+    }
+  } catch {}
+}
+
+// Apply the current theme to the document root (used by popup.js / options.js).
+function applyTheme(theme) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.classList.remove('mh-theme-light', 'mh-theme-dark');
+  if (theme === 'light') root.classList.add('mh-theme-light');
+  else if (theme === 'dark') root.classList.add('mh-theme-dark');
+  // 'auto' or unrecognised → no class, CSS media query handles it.
+  try { localStorage.setItem(THEME_LS_KEY, theme || 'auto'); } catch {}
 }
 
 async function updateSetting(key, value) {
@@ -83,4 +110,5 @@ if (typeof self !== 'undefined') {
   self.saveSettings = saveSettings;
   self.updateSetting = updateSetting;
   self.resetSettings = resetSettings;
+  self.applyTheme = applyTheme;
 }

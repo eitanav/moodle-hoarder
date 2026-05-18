@@ -2,6 +2,15 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
+<script>
+  // Apply theme synchronously to avoid a flash. settings.js updates this
+  // localStorage key whenever the theme setting changes.
+  try {
+    var t = localStorage.getItem('mh-theme');
+    if (t === 'dark') document.documentElement.classList.add('mh-theme-dark');
+    else if (t === 'light') document.documentElement.classList.add('mh-theme-light');
+  } catch (e) {}
+</script>
 <style>
   :root {
     --bg: #ffffff;
@@ -19,8 +28,24 @@
     --new-bg: #fff3cd;
     --new-fg: #7a4e00;
   }
+  /* Dark theme — applies when forced (mh-theme-dark class) OR when system
+     prefers dark and no override class is set. */
+  :root.mh-theme-dark,
+  :root.mh-theme-dark body { color-scheme: dark; }
+  :root.mh-theme-dark {
+    --bg: #1a1a1a;
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+    --row: #262626;
+    --row-hover: #333;
+    --chip-bg: #4a1530;
+    --chip-fg: #ff9bbf;
+    --new-bg: #4a3a00;
+    --new-fg: #ffd966;
+  }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not(.mh-theme-light):not(.mh-theme-dark) {
       --bg: #1a1a1a;
       --fg: #f3f4f6;
       --muted: #9ca3af;

@@ -506,6 +506,8 @@ function renderPicker() {
 let CACHED_SETTINGS = null;
 async function loadCachedSettings() {
   CACHED_SETTINGS = await getSettings();
+  // Apply theme on every popup open in case the user changed it elsewhere.
+  applyTheme(CACHED_SETTINGS.theme);
   return CACHED_SETTINGS;
 }
 

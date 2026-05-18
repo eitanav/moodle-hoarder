@@ -1,38 +1,79 @@
 // Context-menu: right-click any link on Moodle/Ariel → hoard it.
-// Behaviour depends on settings.rightClickBehavior:
-//   'immediate' = download right now via chrome.downloads
-//   'queue'     = push onto a shared queue (popup turns it into a ZIP later)
-//   'ask'       = same as 'immediate' for now (the popup-based picker comes in
-//                 a later iteration). Keeps current behavior predictable.
+// The visible menu items now follow settings.rightClickBehavior:
+//   'immediate' → one item: "הורד עם Moodle Hoarder"  (downloads now)
+//   'queue'     → one item: "הוסף לתור Moodle Hoarder" (always queues)
+//   'ask'       → two items: download-now + add-to-queue (user picks each time)
 
 importScripts('settings.js');
 
 const QUEUE_KEY = 'rightClickQueue';
+const PATTERNS = ['*://moodlearn.ariel.ac.il/*', '*://*.ariel.ac.il/*'];
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.removeAll(() => {
+async function rebuildContextMenus() {
+  const settings = await getSettings();
+  const behavior = settings.rightClickBehavior || 'immediate';
+  await new Promise(res => chrome.contextMenus.removeAll(res));
+
+  // 'hoard-link' = the primary item; behavior decided by `behavior`
+  // 'hoard-link-queue' = explicit queue (only shown for 'ask' mode)
+  if (behavior === 'queue') {
     chrome.contextMenus.create({
       id: 'hoard-link',
-      title: 'הורד עם Moodle Hoarder',
+      title: 'הוסף לתור Moodle Hoarder',
       contexts: ['link'],
-      documentUrlPatterns: ['*://moodlearn.ariel.ac.il/*', '*://*.ariel.ac.il/*'],
+      documentUrlPatterns: PATTERNS,
+    });
+  } else if (behavior === 'ask') {
+    chrome.contextMenus.create({
+      id: 'hoard-link',
+      title: 'הורד מיד עם Moodle Hoarder',
+      contexts: ['link'],
+      documentUrlPatterns: PATTERNS,
     });
     chrome.contextMenus.create({
       id: 'hoard-link-queue',
       title: 'הוסף לתור Moodle Hoarder',
       contexts: ['link'],
-      documentUrlPatterns: ['*://moodlearn.ariel.ac.il/*', '*://*.ariel.ac.il/*'],
+      documentUrlPatterns: PATTERNS,
     });
-  });
+  } else {
+    // 'immediate' (default)
+    chrome.contextMenus.create({
+      id: 'hoard-link',
+      title: 'הורד עם Moodle Hoarder',
+      contexts: ['link'],
+      documentUrlPatterns: PATTERNS,
+    });
+  }
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await rebuildContextMenus();
   updateBadge();
 });
 
-chrome.runtime.onStartup?.addListener(updateBadge);
+chrome.runtime.onStartup?.addListener(async () => {
+  await rebuildContextMenus();
+  updateBadge();
+});
+
+// Whenever the user changes settings (in options.html), rebuild the menu so
+// they see the right item immediately on next right-click.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.settings) {
+    const before = changes.settings.oldValue?.rightClickBehavior || 'immediate';
+    const after = changes.settings.newValue?.rightClickBehavior || 'immediate';
+    if (before !== after) rebuildContextMenus();
+  }
+  if (changes[QUEUE_KEY]) updateBadge();
+});
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!info.linkUrl) return;
   const url = resolveMoodleUrl(info.linkUrl);
   const settings = await getSettings();
+  const behavior = settings.rightClickBehavior || 'immediate';
 
   // Explicit "add to queue" menu always queues.
   if (info.menuItemId === 'hoard-link-queue') {
@@ -41,11 +82,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
   if (info.menuItemId !== 'hoard-link') return;
 
-  if (settings.rightClickBehavior === 'queue') {
+  // The primary item's action depends on the setting:
+  if (behavior === 'queue') {
     await pushQueue({ url, linkText: info.selectionText || '', pageUrl: tab?.url });
     return;
   }
-  // 'immediate' (default) and 'ask' both download now. 'ask' UI is iteration 2.
+  // 'immediate' and 'ask' (with the immediate menu item picked) both download.
   try {
     await chrome.downloads.download({ url, saveAs: !!settings.rightClickSaveAs });
   } catch (e) {

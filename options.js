@@ -128,6 +128,13 @@ function escapeHtml(s) {
 
 (async function init() {
   const settings = await getSettings();
+  applyTheme(settings.theme);
+
+  // Re-apply theme whenever the theme radio changes (binders below trigger
+  // saveSettings; this catches the visual feedback before page reload).
+  document.querySelectorAll('.radios[data-setting="theme"] input').forEach(r => {
+    r.addEventListener('change', () => applyTheme(r.value));
+  });
 
   // toggles
   for (const input of $$('input.toggle')) {
