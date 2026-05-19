@@ -39,12 +39,13 @@ function bindToggle(input, key, settings) {
 }
 
 function bindText(input, key, settings) {
-  input.value = settings[key] || '';
+  input.value = settings[key] ?? '';
   let timer;
   input.addEventListener('input', () => {
     clearTimeout(timer);
     timer = setTimeout(async () => {
-      await updateSetting(key, input.value);
+      const v = input.type === 'number' ? (+input.value || 0) : input.value;
+      await updateSetting(key, v);
       flashSaved();
     }, 350);
   });
@@ -140,8 +141,8 @@ function escapeHtml(s) {
     const key = input.dataset.setting;
     if (key) bindToggle(input, key, settings);
   }
-  // text inputs
-  for (const input of $$('input[type="text"][data-setting]')) {
+  // text + number inputs
+  for (const input of $$('input[type="text"][data-setting], input[type="number"][data-setting]')) {
     bindText(input, input.dataset.setting, settings);
   }
   // radio groups — theme gets a live applyTheme callback so the page

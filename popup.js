@@ -65,19 +65,65 @@ function setProgress(done, total) {
   progressBar.style.width = Math.round((done / total) * 100) + '%';
 }
 function showView(name) {
-  initialView.style.display = name === 'initial' ? 'block' : 'none';
-  pickerView.style.display  = name === 'picker'  ? 'block' : 'none';
-  multiView.style.display   = name === 'multi'   ? 'block' : 'none';
-  const zoomView = document.getElementById('zoomPicker');
-  if (zoomView) zoomView.style.display = name === 'zoom' ? 'block' : 'none';
-  const dlView = document.getElementById('deadlinesView');
-  if (dlView) dlView.style.display = name === 'deadlines' ? 'block' : 'none';
+  const views = {
+    initial:   initialView,
+    picker:    pickerView,
+    multi:     multiView,
+    zoom:      document.getElementById('zoomPicker'),
+    deadlines: document.getElementById('deadlinesView'),
+  };
+  for (const [k, el] of Object.entries(views)) {
+    if (!el) continue;
+    el.style.display = (k === name) ? 'block' : 'none';
+  }
+  setSkeleton(false);
+  // Trigger the fade-in animation on the new view
+  const showing = views[name];
+  if (showing) {
+    showing.classList.remove('mh-view-show');
+    // Force a reflow so the animation re-fires
+    void showing.offsetWidth;
+    showing.classList.add('mh-view-show');
+  }
 }
 
 // Settings button opens the options page in a new tab.
 document.getElementById('openSettings')?.addEventListener('click', () => {
   if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
   else chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+});
+
+// Keyboard shortcuts (ROADMAP #2). Only fire when the popup focus is NOT
+// inside a text input — otherwise typing into the search field would
+// trigger them. Bindings:
+//   Ctrl/Cmd + S   → scan (or download-queue if available)
+//   Ctrl/Cmd + A   → select all in the current picker
+//   Ctrl/Cmd + D   → download (picker / multi / zoom / deadlines export)
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  const key = e.key.toLowerCase();
+  let handled = false;
+  if (key === 's') {
+    handled = true;
+    const scan = document.getElementById('scan');
+    if (scan && !scan.disabled) scan.click();
+  } else if (key === 'a') {
+    handled = true;
+    // Pick the visible "Select all" link/button
+    for (const id of ['selAll', 'courseAll', 'zoomAll']) {
+      const el = document.getElementById(id);
+      if (el && el.offsetParent !== null) { el.click(); break; }
+    }
+  } else if (key === 'd') {
+    handled = true;
+    for (const id of ['download', 'downloadMulti', 'downloadZoom', 'exportDeadlines', 'downloadQueue']) {
+      const el = document.getElementById(id);
+      if (el && el.offsetParent !== null && !el.disabled) { el.click(); break; }
+    }
+  }
+  if (handled) e.preventDefault();
 });
 
 // Bootstrap: load settings into the cache before anything else runs.
@@ -239,8 +285,14 @@ document.getElementById('downloadQueue')?.addEventListener('click', async () => 
 });
 
 // ---------- Initial: scan button ----------
+function setSkeleton(show) {
+  const el = document.getElementById('skeleton');
+  if (el) el.classList.toggle('show', show);
+}
+
 $('scan').addEventListener('click', async () => {
   $('scan').disabled = true;
+  setSkeleton(true);
   setStatus('בודק עמוד...');
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -291,6 +343,8 @@ $('scan').addEventListener('click', async () => {
   } catch (e) {
     setStatus('שגיאה: ' + e.message);
     $('scan').disabled = false;
+  } finally {
+    setSkeleton(false);
   }
 });
 
@@ -600,6 +654,7 @@ async function loadCachedSettings() {
   // them elsewhere.
   applyTheme(CACHED_SETTINGS.theme);
   applyAccent(CACHED_SETTINGS.accentColor);
+  document.body.classList.toggle('mh-compact', !!CACHED_SETTINGS.compactMode);
   return CACHED_SETTINGS;
 }
 
@@ -675,6 +730,52 @@ $('selDefaults').addEventListener('click', () => {
   sectionsEl.querySelectorAll('.section').forEach(updateSectionMaster);
   updateSelCount();
 });
+
+// Toggle every section open / closed (ROADMAP #6)
+$('expandAll').addEventListener('click', () => {
+  const sections = sectionsEl.querySelectorAll('.section');
+  const anyCollapsed = [...sections].some(s => s.classList.contains('collapsed'));
+  sections.forEach(s => {
+    if (anyCollapsed) s.classList.remove('collapsed');
+    else s.classList.add('collapsed');
+  });
+});
+
+// Search history (ROADMAP #10) — remember last N searches in storage and
+// surface them as <datalist> suggestions on the picker search input.
+const SEARCH_HISTORY_KEY = 'mh-search-history';
+const SEARCH_HISTORY_MAX = 12;
+async function loadSearchHistory() {
+  try {
+    const s = await chrome.storage.local.get(SEARCH_HISTORY_KEY);
+    return s[SEARCH_HISTORY_KEY] || [];
+  } catch { return []; }
+}
+async function pushSearchHistory(q) {
+  q = (q || '').trim();
+  if (!q || q.length < 2) return;
+  const cur = await loadSearchHistory();
+  const next = [q, ...cur.filter(x => x !== q)].slice(0, SEARCH_HISTORY_MAX);
+  try { await chrome.storage.local.set({ [SEARCH_HISTORY_KEY]: next }); } catch {}
+  renderSearchHistory(next);
+}
+function renderSearchHistory(arr) {
+  const dl = document.getElementById('searchHistory');
+  if (!dl) return;
+  dl.innerHTML = '';
+  for (const q of arr) {
+    const opt = document.createElement('option');
+    opt.value = q;
+    dl.appendChild(opt);
+  }
+}
+// Load history on boot and persist on change with a small debounce
+loadSearchHistory().then(renderSearchHistory);
+let searchSaveTimer = null;
+searchEl.addEventListener('change', () => {
+  clearTimeout(searchSaveTimer);
+  searchSaveTimer = setTimeout(() => pushSearchHistory(searchEl.value), 400);
+});
 $('selOnlyNew').addEventListener('click', () => {
   scanned.sections.forEach(sec => sec.items.forEach(it => {
     const li = sectionsEl.querySelector(`li[data-idx="${it.idx}"]`);
@@ -700,21 +801,66 @@ $('back').addEventListener('click', () => {
 });
 
 // ========== Multi-course rendering ==========
-function renderMulti() {
+// Pinning (ROADMAP #25 + #25.1) — `coursePins` is a Set of course IDs the
+// user pinned manually; `courseClicks` tracks how often each course was
+// downloaded so frequent ones float to the top automatically. Pinned
+// courses always come before auto-sorted ones.
+const PINS_KEY  = 'mh-course-pins';
+const CLICKS_KEY = 'mh-course-clicks';
+
+async function loadPins() {
+  try {
+    const s = await chrome.storage.local.get([PINS_KEY, CLICKS_KEY]);
+    return { pins: new Set(s[PINS_KEY] || []), clicks: s[CLICKS_KEY] || {} };
+  } catch { return { pins: new Set(), clicks: {} }; }
+}
+async function togglePin(courseId) {
+  const { pins } = await loadPins();
+  if (pins.has(courseId)) pins.delete(courseId);
+  else pins.add(courseId);
+  try { await chrome.storage.local.set({ [PINS_KEY]: [...pins] }); } catch {}
+}
+async function bumpCourseClick(courseId) {
+  if (!courseId) return;
+  const { clicks } = await loadPins();
+  clicks[courseId] = (clicks[courseId] || 0) + 1;
+  try { await chrome.storage.local.set({ [CLICKS_KEY]: clicks }); } catch {}
+}
+
+async function renderMulti() {
   showView('multi');
   coursesEl.innerHTML = '';
-  totCoursesEl.textContent = multiScanned.courses.length;
-  for (const c of multiScanned.courses) {
+  const { pins, clicks } = await loadPins();
+  // Sort: pinned first (alphabetically), then by descending click count,
+  // then by original order for ties.
+  const indexed = multiScanned.courses.map((c, i) => ({ ...c, _i: i }));
+  indexed.sort((a, b) => {
+    const ap = pins.has(a.id), bp = pins.has(b.id);
+    if (ap !== bp) return ap ? -1 : 1;
+    const ac = clicks[a.id] || 0, bc = clicks[b.id] || 0;
+    if (ac !== bc) return bc - ac;
+    return a._i - b._i;
+  });
+  totCoursesEl.textContent = indexed.length;
+  for (const c of indexed) {
     const li = document.createElement('li');
     li.dataset.id = c.id;
+    const isPinned = pins.has(c.id);
     li.innerHTML = `
       <input type="checkbox" checked>
       <div style="flex:1;overflow:hidden;">
         <div class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
-        <div class="id">ID ${c.id}</div>
-      </div>`;
+        <div class="id">ID ${c.id}${(clicks[c.id] || 0) > 0 ? ` · ${clicks[c.id]} הורדות` : ''}</div>
+      </div>
+      <button class="mh-pin" title="${isPinned ? 'בטל הצמדה' : 'הצמד למעלה'}" style="background:transparent;border:none;cursor:pointer;font-size:16px;width:auto;padding:4px;color:${isPinned ? 'var(--accent)' : 'var(--muted)'}">${isPinned ? '📌' : '📍'}</button>`;
     li.querySelector('.name').textContent = c.name;
     li.querySelector('input').addEventListener('change', updateCourseCount);
+    li.querySelector('.mh-pin').addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await togglePin(c.id);
+      renderMulti();
+    });
     coursesEl.appendChild(li);
   }
   updateCourseCount();
@@ -1124,6 +1270,8 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
     await saveSeen(courseId, items, { courseName, courseUrl });
     // Successful run — clear the checkpoint so the next download starts fresh.
     await clearCheckpoint(courseId);
+    // Bump download counter so frequent courses auto-pin in multi-course view.
+    await bumpCourseClick(courseId);
   }
 
   setStatus(`הושלם: ${files.length} פריטים, ${formatSize(zipBlob.size)}.`);

@@ -58,6 +58,15 @@ const SETTINGS_DEFAULTS = {
   // Accent palette. 'orange-pink' = default brand colors,
   // 'blue-ariel' = Ariel University blue.
   accentColor: 'orange-pink',
+
+  // Compact mode — single-line item rows in pickers. Useful when a course
+  // has many items and the popup needs to fit more on screen.
+  compactMode: false,
+
+  // Max file size warning (MB). 0 = disabled. When > 0, the popup warns
+  // before including files larger than this in the ZIP. The user can
+  // still opt in; we just unselect them by default in the picker.
+  maxFileSizeMB: 0,
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

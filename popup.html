@@ -46,12 +46,12 @@
   :root.mh-theme-dark {
     --bg: #1a1a1a;
     --fg: #f3f4f6;
-    --muted: #9ca3af;
-    --border: #374151;
-    --row: #262626;
-    --row-hover: #333;
+    --muted: #b8c0cc;
+    --border: #4a5160;
+    --row: #2a2a2a;
+    --row-hover: #353535;
     --chip-bg: #4a1530;
-    --chip-fg: #ff9bbf;
+    --chip-fg: #ffb3cc;
     --new-bg: #4a3a00;
     --new-fg: #ffd966;
   }
@@ -59,15 +59,44 @@
     :root:not(.mh-theme-light):not(.mh-theme-dark) {
       --bg: #1a1a1a;
       --fg: #f3f4f6;
-      --muted: #9ca3af;
-      --border: #374151;
-      --row: #262626;
-      --row-hover: #333;
+      --muted: #b8c0cc;
+      --border: #4a5160;
+      --row: #2a2a2a;
+      --row-hover: #353535;
       --chip-bg: #4a1530;
-      --chip-fg: #ff9bbf;
+      --chip-fg: #ffb3cc;
       --new-bg: #4a3a00;
       --new-fg: #ffd966;
     }
+  }
+
+  /* View transitions — quick fade-in when switching popup screens */
+  @keyframes mh-view-in {
+    from { opacity: 0.3; transform: translateY(-3px); }
+    to   { opacity: 1;   transform: translateY(0); }
+  }
+  .mh-view-show { animation: mh-view-in 0.18s ease-out; }
+
+  /* Skeleton loader shown while scanning (ROADMAP #13) */
+  @keyframes mh-skeleton {
+    0%   { opacity: 0.4; }
+    50%  { opacity: 0.7; }
+    100% { opacity: 0.4; }
+  }
+  .mh-skeleton {
+    display: none;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .mh-skeleton.show { display: block; }
+  .mh-skeleton .row {
+    height: 14px;
+    margin: 6px 0;
+    background: var(--row-hover);
+    border-radius: 4px;
+    animation: mh-skeleton 1.2s ease-in-out infinite;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -171,8 +200,18 @@
   .banner.show { display: block; }
   .banner .actions { margin-top: 6px; display: flex; gap: 6px; }
 
-  .summary { font-size: 11px; color: var(--muted); margin: 6px 0; }
-  .summary .count { color: var(--accent); font-weight: 600; }
+  .summary { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .summary .count {
+    display: inline-block;
+    color: white;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-weight: 700;
+    font-size: 12px;
+    min-width: 18px;
+    text-align: center;
+  }
 
   .sections {
     margin-top: 4px;
@@ -209,6 +248,10 @@
     font-size: 12px;
     background: var(--row);
   }
+  /* Compact mode: tighter row spacing (ROADMAP #1) */
+  body.mh-compact .section-items li { padding: 2px 10px 2px 26px; font-size: 11px; }
+  body.mh-compact ul.courses li { padding: 4px 10px; }
+  body.mh-compact .sections { max-height: 380px; }
   .section-items li:hover { background: var(--row-hover); }
   .section-items li.hidden { display: none; }
   .section-items input[type=checkbox] { margin: 0; cursor: pointer; }
@@ -264,6 +307,12 @@
   <div id="initial">
     <button id="scan">סרוק</button>
     <div class="hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+    <div id="skeleton" class="mh-skeleton">
+      <div class="row" style="width:70%"></div>
+      <div class="row" style="width:90%"></div>
+      <div class="row" style="width:55%"></div>
+      <div class="row" style="width:80%"></div>
+    </div>
     <div id="queueArea" style="display:none; margin-top:10px;">
       <button id="downloadQueue" style="background: var(--row); color: var(--fg); border: 1px solid var(--border);">
         <span id="queueCountText">0 פריטים בתור</span> · הורד הכל כ-ZIP
@@ -274,11 +323,13 @@
 
   <div id="picker" style="display:none;">
     <div class="toolbar">
-      <input id="search" type="search" placeholder="חיפוש...">
+      <input id="search" type="search" placeholder="חיפוש..." list="searchHistory">
       <a id="selAll">הכל</a>
       <a id="selNone">ניקוי</a>
       <a id="selDefaults">איפוס</a>
+      <a id="expandAll" title="פתח/סגור הכל">▾</a>
     </div>
+    <datalist id="searchHistory"></datalist>
     <div class="banner" id="diffBanner">
       <div id="diffText"></div>
       <div class="actions">

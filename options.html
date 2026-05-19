@@ -205,18 +205,38 @@
 
   #status {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
-    padding: 10px 16px;
-    background: var(--ok);
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #43a047, #1b5e20);
     color: white;
-    border-radius: 8px;
-    font-size: 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
     opacity: 0;
     pointer-events: none;
-    transition: opacity .2s;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-  #status.show { opacity: 1; }
+  #status.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  #status::before {
+    content: '✓';
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    text-align: center;
+    border: 2px solid white;
+    border-radius: 50%;
+    font-weight: 900;
+  }
 
   /* History dashboard */
   table.history {
@@ -281,6 +301,13 @@
       </div>
     </div>
   </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">מצב קומפקטי</div>
+      <div class="hint">פריטים בשורה אחת קטנה במקום שתיים. נוח לקורסים גדולים עם הרבה פריטים.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="compactMode"></div>
+  </div>
 </section>
 
 <section>
@@ -331,6 +358,15 @@
       <div class="hint">שולף את העמוד Grader Report של הקורס ומוסיף ל-ZIP כקובץ <code>ציונים.csv</code>. <strong>שים לב — כשמשתפים את ה-ZIP, גם הציונים שלך נכללים.</strong> ברירת מחדל כבוי.</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="includeGrades"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">סף גודל קובץ (MB)</div>
+      <div class="hint">קבצים גדולים מהסף לא יסומנו בדיפולט בבורר הקורס — תקבל אזהרה ותוכל לסמן ידנית. <code>0</code> = מבוטל (כל הקבצים נבחרים כרגיל).</div>
+    </div>
+    <div class="control" style="width: 100px;">
+      <input type="number" min="0" step="1" data-setting="maxFileSizeMB" placeholder="0">
+    </div>
   </div>
   <div class="row">
     <div class="label">
