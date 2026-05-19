@@ -2510,24 +2510,37 @@ function extractDeadlinesFromPage() {
     );
     const course = (courseEl?.textContent || '').replace(/\s+/g, ' ').trim();
 
-    // Try several ways to get the due timestamp. The date label sometimes
-    // lives in a parent/sibling wrapper, not inside the event row itself —
-    // so we walk up the DOM up to 5 levels until we find something with
-    // a date in it (data-timestamp, <time datetime>, or visible DD/MM/YYYY).
-    let due = null;
-    let scope = row;
-    for (let hop = 0; hop < 5 && !due; hop++) {
+    // Pick the right "container" for this row — walk up until the parent
+    // contains ANOTHER event. Going further would pull in dates that belong
+    // to other rows (that's why the previous version applied one date to
+    // every item). The container is the largest wrapper that's still
+    // exclusive to this row.
+    const eventSel =
+      '[data-region="event-list-item"], [data-region="dashboard-timeline-event"],' +
+      ' [data-region="upcoming-event-list-item"], .event-list-item, .timeline-event-list-item';
+    let container = row;
+    for (let i = 0; i < 5; i++) {
+      if (!container.parentElement) break;
+      const parent = container.parentElement;
+      const others = [...parent.querySelectorAll(eventSel)]
+        .filter(e => e !== row && !e.contains(row) && !row.contains(e));
+      if (others.length > 0) break;
+      container = parent;
+      if (container.matches?.('[data-block="timeline"], .block_timeline, [data-region="event-list-content"], [data-region="timeline-events"]')) break;
+    }
+
+    function parseScope(scope) {
+      if (!scope) return null;
       const tsAttr = scope.querySelector?.('[data-timestamp]');
       if (tsAttr?.dataset?.timestamp) {
         const v = +tsAttr.dataset.timestamp;
-        if (!isNaN(v) && v > 0) { due = v * 1000; break; }
+        if (!isNaN(v) && v > 0) return v * 1000;
       }
       const timeEl = scope.querySelector?.('time[datetime]');
       if (timeEl?.dateTime) {
         const t = new Date(timeEl.dateTime).getTime();
-        if (!isNaN(t)) { due = t; break; }
+        if (!isNaN(t)) return t;
       }
-      // Visible text — DD/MM/YYYY plus optional HH:MM
       const text = scope.textContent || '';
       const dateM = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       const timeM = text.match(/(\d{1,2}):(\d{2})/);
@@ -2536,13 +2549,31 @@ function extractDeadlinesFromPage() {
         const hour = timeM ? +timeM[1] : 23;
         const min  = timeM ? +timeM[2] : 59;
         const t = new Date(year, month, day, hour, min).getTime();
-        if (!isNaN(t)) { due = t; break; }
+        if (!isNaN(t)) return t;
       }
-      if (!scope.parentElement) break;
-      scope = scope.parentElement;
-      // Safety: stop before we hit the whole timeline block.
-      if (scope.matches?.('[data-block="timeline"], .block_timeline, [data-region="event-list-content"], [data-region="timeline-events"]')) break;
+      return null;
     }
+
+    let due = parseScope(container);
+
+    // If the container didn't have a date, the date is probably in a
+    // short label sibling just before the container (day-headers laid out
+    // as siblings rather than wrappers). Walk back through up to 3 short
+    // siblings, stopping at another event.
+    if (!due) {
+      let sib = container.previousElementSibling;
+      for (let i = 0; i < 3 && sib && !due; i++) {
+        const txt = (sib.textContent || '').trim();
+        if (sib.matches?.(eventSel) || sib.querySelector?.(eventSel)) break;
+        if (txt && txt.length < 120) {
+          due = parseScope(sib);
+          if (due) break;
+        }
+        sib = sib.previousElementSibling;
+      }
+    }
+    // Last-ditch: try the row by itself.
+    if (!due) due = parseScope(row);
 
     const late = /באיחור|overdue|late/i.test(row.textContent || '');
 
@@ -2560,6 +2591,10 @@ async function annotateDeadlines(deadlines) {
   const stored = await chrome.storage.local.get(['hiddenDeadlines', 'deadlinesSnapshot']);
   const hidden = new Set(stored.hiddenDeadlines || []);
   const prev = stored.deadlinesSnapshot?.deadlines || [];
+  // First-ever scan? Don't mark everything as "חדש" — there's nothing to
+  // compare against. The snapshot will be saved at the end of this scan
+  // so the next visit can actually mark new items.
+  const hasPrev = prev.length > 0;
   const prevMap = new Map(prev.map(d => [d.id, d]));
   const now = Date.now();
   const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
@@ -2572,10 +2607,14 @@ async function annotateDeadlines(deadlines) {
     else if (d.due <= weekFromNow) d.kind = 'thisWeek';
     else d.kind = 'future';
 
-    const pv = prevMap.get(d.id);
-    if (!pv) d.change = 'new';
-    else if (pv.due !== d.due) d.change = 'updated';
-    else d.change = null;
+    if (!hasPrev) {
+      d.change = null;
+    } else {
+      const pv = prevMap.get(d.id);
+      if (!pv) d.change = 'new';
+      else if (pv.due !== d.due) d.change = 'updated';
+      else d.change = null;
+    }
   }
   return visible;
 }
