@@ -1494,11 +1494,15 @@ function buildICS(events, courseName) {
   const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Moodle Hoarder//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
   lines.push(`X-WR-CALNAME:${icsEsc(courseName || 'Moodle deadlines')}`);
   for (const e of events) {
-    const start = formatICSDate(e.start);
-    const end = formatICSDate(new Date(e.start.getTime() + 30 * 60 * 1000));
+    // Use "floating" time (no Z, no TZID) — this tells calendars to display
+    // the event at the same wall-clock time regardless of timezone, which
+    // matches what the user saw in Moodle. The previous UTC encoding led
+    // calendars to apply timezone offsets and show wrong hours.
+    const start = formatICSFloating(e.start);
+    const end   = formatICSFloating(new Date(e.start.getTime() + 30 * 60 * 1000));
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${e.uid}`);
-    lines.push(`DTSTAMP:${formatICSDate(new Date())}`);
+    lines.push(`DTSTAMP:${formatICSUtc(new Date())}`);
     lines.push(`SUMMARY:${icsEsc(e.summary)}`);
     lines.push(`DTSTART:${start}`);
     lines.push(`DTEND:${end}`);
@@ -1515,7 +1519,16 @@ function buildICS(events, courseName) {
   return lines.join('\r\n');
 }
 function icsEsc(s) { return String(s).replace(/\\/g, '\\\\').replace(/[,;]/g, '\\$&').replace(/\n/g, '\\n'); }
-function formatICSDate(d) {
+// Floating-time format: YYYYMMDDTHHMMSS (no Z, no TZID). Calendar interprets
+// in its current local timezone — matching the user's clock at the time of
+// the assignment, no surprise offsets.
+function formatICSFloating(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+// DTSTAMP must be UTC per spec; this is just "when the ICS was generated"
+// and doesn't affect event display.
+function formatICSUtc(d) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
 }
@@ -2531,27 +2544,48 @@ function extractDeadlinesFromPage() {
 
     function parseScope(scope) {
       if (!scope) return null;
-      const tsAttr = scope.querySelector?.('[data-timestamp]');
-      if (tsAttr?.dataset?.timestamp) {
-        const v = +tsAttr.dataset.timestamp;
-        if (!isNaN(v) && v > 0) return v * 1000;
+      // 1. data-timestamp / data-* conventions
+      const dataSelectors = ['[data-timestamp]', '[data-due]', '[data-event-time]', '[data-start-timestamp]', '[data-time]'];
+      for (const sel of dataSelectors) {
+        const el = scope.querySelector?.(sel);
+        if (!el) continue;
+        for (const key of ['timestamp', 'due', 'eventTime', 'startTimestamp', 'time']) {
+          const v = +el.dataset[key];
+          if (!isNaN(v) && v > 0) {
+            // Could be seconds or ms
+            return v < 1e12 ? v * 1000 : v;
+          }
+        }
       }
+      // 2. <time datetime="...">
       const timeEl = scope.querySelector?.('time[datetime]');
       if (timeEl?.dateTime) {
         const t = new Date(timeEl.dateTime).getTime();
         if (!isNaN(t)) return t;
       }
-      const text = scope.textContent || '';
-      const dateM = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      const timeM = text.match(/(\d{1,2}):(\d{2})/);
-      if (dateM) {
-        const day = +dateM[1], month = +dateM[2] - 1, year = +dateM[3];
-        const hour = timeM ? +timeM[1] : 23;
-        const min  = timeM ? +timeM[2] : 59;
-        const t = new Date(year, month, day, hour, min).getTime();
-        if (!isNaN(t)) return t;
+      // 3. Visible text — strip bidi marks first (Hebrew Moodle often
+      // embeds LRM/RLM around numbers, which can split regex matches).
+      const text = (scope.textContent || '').replace(/[‎‏‪-‮⁦-⁩﻿]/g, '');
+      const dateM = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(text);
+      if (!dateM) return null;
+      const day = +dateM[1], month = +dateM[2] - 1, year = +dateM[3];
+
+      // Find the time CLOSEST to the date string — prefer the one that
+      // appears right after the date, then right before. This avoids
+      // picking up unrelated times like "updated 10:30 ago".
+      let hour = 23, min = 59;
+      const afterDate = text.slice(dateM.index + dateM[0].length);
+      let m = /^[^0-9]{0,15}(\d{1,2}):(\d{2})/.exec(afterDate);
+      if (!m) {
+        const beforeDate = text.slice(0, dateM.index);
+        m = /(\d{1,2}):(\d{2})[^0-9]{0,15}$/.exec(beforeDate);
       }
-      return null;
+      if (m) {
+        const h = +m[1], mm = +m[2];
+        if (h < 24 && mm < 60) { hour = h; min = mm; }
+      }
+      const t = new Date(year, month, day, hour, min).getTime();
+      return isNaN(t) ? null : t;
     }
 
     let due = parseScope(container);
