@@ -1385,6 +1385,15 @@ async function fetchResource(item) {
     res = await fetch(fileUrl, { credentials: 'include' });
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // ROADMAP #19 — max file size warning. If the user set a threshold and the
+  // server reports Content-Length above it, skip the file with a clear error.
+  const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
+  if (maxMB > 0) {
+    const cl = +res.headers.get('Content-Length');
+    if (cl > 0 && cl > maxMB * 1024 * 1024) {
+      throw new Error(`קובץ ${(cl / 1024 / 1024).toFixed(1)}MB מעל סף ה-${maxMB}MB — דולג`);
+    }
+  }
   const blob = await res.blob();
   const fn = filenameFromResponse(res) || sanitizeFilename(item.name) || `resource_${item.id}`;
   return [{ path: fn, blob }];
@@ -1397,11 +1406,21 @@ async function fetchFolder(item) {
     const res = await fetch(dlUrl, { credentials: 'include' });
     const ct = (res.headers.get('Content-Type') || '').toLowerCase();
     if (res.ok && (ct.includes('zip') || ct.includes('octet-stream'))) {
+      const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
+      if (maxMB > 0) {
+        const cl = +res.headers.get('Content-Length');
+        if (cl > 0 && cl > maxMB * 1024 * 1024) {
+          throw new Error(`תיקייה ${(cl / 1024 / 1024).toFixed(1)}MB מעל סף ה-${maxMB}MB — דולג`);
+        }
+      }
       const blob = await res.blob();
       const fn = filenameFromResponse(res) || (sanitizeFilename(item.name) + '.zip');
       return [{ path: fn, blob }];
     }
-  } catch {}
+  } catch (e) {
+    // If it's the size-threshold error we threw, propagate so the user sees it.
+    if (e.message && e.message.includes('סף')) throw e;
+  }
   // Fallback: scrape
   const res = await fetch(item.url, { credentials: 'include' });
   const html = await res.text();
@@ -1474,16 +1493,41 @@ async function fetchAssign(item) {
 }
 
 function extractAssignDue(doc) {
-  // Look at "Due date" / "תאריך אחרון להגשה" rows; modern Moodle uses .activity-dates
+  // Approach 1: structured timestamps (most reliable)
+  for (const el of doc.querySelectorAll('[data-timestamp]')) {
+    const v = +el.dataset.timestamp;
+    if (!isNaN(v) && v > 0) {
+      // The activity-dates block usually has multiple timestamps (open + due).
+      // Prefer one labeled as "due"/"close"/"מועד אחרון".
+      const labelEl = el.closest('[data-region="activity-date"], .activity-date, div, li');
+      const label = (labelEl?.textContent || '').toLowerCase();
+      if (/מועד\s+אחרון|תאריך\s+אחרון|due|close|cut[-\s]?off|deadline|הגשה/i.test(label)) {
+        return new Date(v < 1e12 ? v * 1000 : v);
+      }
+    }
+  }
+  for (const el of doc.querySelectorAll('time[datetime]')) {
+    const t = new Date(el.dateTime);
+    if (!isNaN(t)) {
+      const ctx = (el.closest('[data-region="activity-date"], .activity-date, div, li, td, tr')?.textContent || '').toLowerCase();
+      if (/מועד\s+אחרון|תאריך\s+אחרון|due|close|cut[-\s]?off|deadline|הגשה/i.test(ctx)) {
+        return t;
+      }
+    }
+  }
+
+  // Approach 2: text scrape — look for cells/divs whose text mentions a due-like label
   const candidates = [];
-  for (const el of doc.querySelectorAll('.activity-dates div, .activity-dates [data-region="activity-date"], table tr td, .description-inner div, .description-content div')) {
+  for (const el of doc.querySelectorAll('.activity-dates div, .activity-dates [data-region="activity-date"], table tr td, .description-inner div, .description-content div, .description div, dl > *')) {
     const t = (el.textContent || '').trim();
     if (!t) continue;
-    if (/תאריך\s+אחרון|מועד\s+אחרון|due\s+date|cut[-\s]?off|deadline/i.test(t)) candidates.push(t);
+    if (/תאריך\s+אחרון|מועד\s+אחרון|תאריך\s+הגשה|מועד\s+הגשה|due\s+date|cut[-\s]?off|deadline|close/i.test(t)) {
+      candidates.push(t);
+    }
   }
   // Sibling cell pattern (table-based assignment summary)
-  for (const td of doc.querySelectorAll('td')) {
-    if (/תאריך\s+אחרון|מועד\s+אחרון|due\s+date|cut[-\s]?off/i.test(td.textContent || '')) {
+  for (const td of doc.querySelectorAll('td, dt')) {
+    if (/תאריך\s+אחרון|מועד\s+אחרון|תאריך\s+הגשה|מועד\s+הגשה|due\s+date|cut[-\s]?off/i.test(td.textContent || '')) {
       const next = td.nextElementSibling;
       if (next) candidates.push(next.textContent.trim());
     }
@@ -1491,6 +1535,12 @@ function extractAssignDue(doc) {
   for (const c of candidates) {
     const d = parseDate(c);
     if (d) return d;
+  }
+  // Approach 3: any standalone time element in the activity-dates block
+  const dueTimeEl = doc.querySelector('[data-region="activity-dates"] time[datetime], .activity-dates time[datetime]');
+  if (dueTimeEl?.dateTime) {
+    const t = new Date(dueTimeEl.dateTime);
+    if (!isNaN(t)) return t;
   }
   return null;
 }
