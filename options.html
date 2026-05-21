@@ -266,15 +266,33 @@
 <header>
   <img src="icons/icon-128.png" alt="">
   <div>
-    <h1>Moodle Hoarder — הגדרות</h1>
-    <div class="sub">כל הטוגלים והאופציות במקום אחד</div>
+    <h1 data-i18n="options.header.title">Moodle Hoarder — הגדרות</h1>
+    <div class="sub" data-i18n="options.header.sub">כל הטוגלים והאופציות במקום אחד</div>
   </div>
 </header>
 
 <main>
 
 <section>
-  <h2>מראה</h2>
+  <h2 data-i18n="opt.section.language">שפת ממשק</h2>
+  <p class="desc">בחר את שפת הממשק של התוסף (לא משפיע על תוכן הקורסים)</p>
+  <div class="row">
+    <div class="label">
+      <div class="name" data-i18n="opt.lang.title">שפת ממשק</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.lang.hint">"אוטומטי" יקבע את השפה לפי הקורס הפתוח כעת ב-Moodle (לפי תג ה-<code>&lt;html lang&gt;</code>). אחרת — בחירה ידנית.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="uiLanguage">
+        <label><input type="radio" name="uiLanguage" value="auto"><span data-i18n="opt.lang.auto">אוטומטי</span></label>
+        <label><input type="radio" name="uiLanguage" value="he"><span data-i18n="opt.lang.he">עברית</span></label>
+        <label><input type="radio" name="uiLanguage" value="en"><span data-i18n="opt.lang.en">English</span></label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.appearance">מראה</h2>
   <p class="desc">בהיר / כהה / לפי הגדרת מערכת ההפעלה</p>
   <div class="row">
     <div class="label">
@@ -311,7 +329,7 @@
 </section>
 
 <section>
-  <h2>מבנה ה-ZIP</h2>
+  <h2 data-i18n="opt.section.zip">מבנה ה-ZIP</h2>
   <p class="desc">איך לארגן את הקבצים בתוך קובץ ה-ZIP שמורד</p>
   <div class="row">
     <div class="label">
@@ -329,7 +347,7 @@
 </section>
 
 <section>
-  <h2>הורדה</h2>
+  <h2 data-i18n="opt.section.download">הורדה</h2>
   <p class="desc">איפה וכיצד נשמרים הקבצים</p>
   <div class="row">
     <div class="label">
@@ -350,7 +368,7 @@
 </section>
 
 <section>
-  <h2>תוכן</h2>
+  <h2 data-i18n="opt.section.content">תוכן</h2>
   <p class="desc">אילו פעילויות לכלול בהורדה</p>
   <div class="row">
     <div class="label">
@@ -378,7 +396,7 @@
 </section>
 
 <section>
-  <h2>קליק ימני</h2>
+  <h2 data-i18n="opt.section.rightclick">קליק ימני</h2>
   <p class="desc">התנהגות התפריט "הורד עם Moodle Hoarder"</p>
   <div class="row">
     <div class="label">
@@ -403,7 +421,7 @@
 </section>
 
 <section>
-  <h2>היסטוריה</h2>
+  <h2 data-i18n="opt.section.history">היסטוריה</h2>
   <p class="desc">כל הקורסים שהורדת — לחיצה כדי לפתוח שוב את עמוד הקורס במודל</p>
   <div id="historyContainer">
     <table class="history" id="historyTable"></table>
@@ -414,7 +432,7 @@
 </section>
 
 <section>
-  <h2>גיבוי</h2>
+  <h2 data-i18n="opt.section.reset">גיבוי</h2>
   <p class="desc">איפוס כל ההגדרות לברירת המחדל</p>
   <div class="row">
     <div class="label">
@@ -429,9 +447,10 @@
 
 </main>
 
-<div id="status">נשמר</div>
+<div id="status" data-i18n="status.saved">נשמר</div>
 
 <script src="settings.js"></script>
+<script src="i18n.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

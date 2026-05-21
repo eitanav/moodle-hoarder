@@ -828,6 +828,25 @@ async function loadCachedSettings() {
   applyTheme(CACHED_SETTINGS.theme);
   applyAccent(CACHED_SETTINGS.accentColor);
   document.body.classList.toggle('mh-compact', !!CACHED_SETTINGS.compactMode);
+  // Resolve & apply UI language (ROADMAP #16). For 'auto', sniff the
+  // active Moodle tab's <html lang> via scripting; falls back gracefully
+  // if the active tab isn't a Moodle page.
+  let courseLang = null;
+  if (CACHED_SETTINGS.uiLanguage === 'auto') {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && tab.url && /moodlearn\.ariel\.ac\.il/.test(tab.url)) {
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => document.documentElement.getAttribute('lang') || '',
+        });
+        courseLang = result || null;
+      }
+    } catch {}
+  }
+  if (typeof applyLanguage === 'function') {
+    applyLanguage(resolveLanguage(CACHED_SETTINGS.uiLanguage, courseLang));
+  }
   return CACHED_SETTINGS;
 }
 

@@ -67,6 +67,11 @@ const SETTINGS_DEFAULTS = {
   // before including files larger than this in the ZIP. The user can
   // still opt in; we just unselect them by default in the picker.
   maxFileSizeMB: 0,
+
+  // UI language (ROADMAP #16). 'auto' = follow the open Moodle course's
+  // <html lang> (falls back to navigator.language and finally Hebrew).
+  // 'he' or 'en' = force.
+  uiLanguage: 'auto',
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

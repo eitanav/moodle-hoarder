@@ -347,16 +347,16 @@
 <header>
   <img src="icons/icon-48.png" alt="">
   <div style="flex:1;">
-    <h1>Moodle Hoarder</h1>
-    <div class="sub">אוסף לך הכל מהמודל לתיק אחד</div>
+    <h1 data-i18n="app.title">Moodle Hoarder</h1>
+    <div class="sub" data-i18n="app.tagline">אוסף לך הכל מהמודל לתיק אחד</div>
   </div>
-  <button id="openSettings" title="הגדרות" style="background:transparent;border:none;color:white;cursor:pointer;font-size:18px;padding:6px;width:auto;">⚙</button>
+  <button id="openSettings" data-i18n-attr="title:app.settings.title" title="הגדרות" style="background:transparent;border:none;color:white;cursor:pointer;font-size:18px;padding:6px;width:auto;">⚙</button>
 </header>
 
 <main>
   <div id="initial">
-    <button id="scan">סרוק</button>
-    <div class="hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+    <button id="scan" data-i18n="btn.scan">סרוק</button>
+    <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
     <div id="skeleton" class="mh-skeleton">
       <div class="row" style="width:70%"></div>
       <div class="row" style="width:90%"></div>
@@ -373,11 +373,11 @@
 
   <div id="picker" style="display:none;">
     <div class="toolbar">
-      <input id="search" type="search" placeholder="חיפוש..." list="searchHistory">
-      <a id="selAll">הכל</a>
-      <a id="selNone">ניקוי</a>
-      <a id="selDefaults">איפוס</a>
-      <a id="expandAll" title="פתח/סגור הכל">▾</a>
+      <input id="search" type="search" data-i18n-attr="placeholder:picker.search.placeholder" placeholder="חיפוש..." list="searchHistory">
+      <a id="selAll" data-i18n="btn.select.all">הכל</a>
+      <a id="selNone" data-i18n="btn.select.none">ניקוי</a>
+      <a id="selDefaults" data-i18n="btn.select.defaults">איפוס</a>
+      <a id="expandAll" data-i18n-attr="title:picker.expand.all.title" title="פתח/סגור הכל">▾</a>
     </div>
     <datalist id="searchHistory"></datalist>
     <div class="banner" id="diffBanner">
@@ -387,59 +387,59 @@
         <button class="tiny secondary" id="selAllInBanner">הכל</button>
       </div>
     </div>
-    <div class="summary"><span class="count" id="selCount">0</span> מתוך <span id="totCount">0</span> נבחרו</div>
+    <div class="summary"><span class="count" id="selCount">0</span> <span data-i18n="picker.selected.of">מתוך</span> <span id="totCount">0</span> <span data-i18n="picker.selected.suffix">נבחרו</span></div>
     <div id="sizeScanStatus"></div>
     <div class="sections" id="sections"></div>
     <div class="row-btns">
-      <button class="secondary" id="back">חזור</button>
-      <button id="download">הורד ל-ZIP</button>
+      <button class="secondary" id="back" data-i18n="btn.back">חזור</button>
+      <button id="download" data-i18n="btn.download.zip">הורד ל-ZIP</button>
     </div>
   </div>
 
   <div id="multiPicker" style="display:none;">
-    <div class="summary">נמצאו <span class="count" id="totCourses">0</span> קורסים בעמוד "הקורסים שלי".</div>
+    <div class="summary"><span data-i18n="multi.found.prefix">נמצאו</span> <span class="count" id="totCourses">0</span> <span data-i18n="multi.found.suffix">קורסים בעמוד "הקורסים שלי".</span></div>
     <div class="toolbar">
-      <input id="searchCourses" type="search" placeholder="חיפוש קורס...">
-      <a id="courseAll">הכל</a>
-      <a id="courseNone">ניקוי</a>
+      <input id="searchCourses" type="search" data-i18n-attr="placeholder:multi.search.placeholder" placeholder="חיפוש קורס...">
+      <a id="courseAll" data-i18n="btn.select.all">הכל</a>
+      <a id="courseNone" data-i18n="btn.select.none">ניקוי</a>
     </div>
     <ul class="courses" id="courses"></ul>
     <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
         <input type="checkbox" id="onlyNewMulti">
-        הורד רק קבצים חדשים בכל קורס
+        <span data-i18n="multi.only.new">הורד רק קבצים חדשים בכל קורס</span>
       </label>
     </div>
     <div class="row-btns">
-      <button class="secondary" id="backMulti">חזור</button>
-      <button id="downloadMulti">הורד את כל הקורסים שנבחרו</button>
+      <button class="secondary" id="backMulti" data-i18n="btn.back">חזור</button>
+      <button id="downloadMulti" data-i18n="btn.download.all">הורד את כל הקורסים שנבחרו</button>
     </div>
   </div>
 
   <div id="deadlinesView" style="display:none;">
-    <div class="summary">נמצאו <span class="count" id="totDeadlines">0</span> מטלות (ללא המוסתרות).</div>
+    <div class="summary"><span data-i18n="deadlines.found.prefix">נמצאו</span> <span class="count" id="totDeadlines">0</span> <span data-i18n="deadlines.found.suffix">מטלות (ללא המוסתרות).</span></div>
     <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
     <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
-    <div class="hint" style="margin-top:6px;">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.</div>
+    <div class="hint" style="margin-top:6px;" data-i18n="deadlines.help.ical">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.</div>
     <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
     <div class="row-btns">
-      <button class="secondary" id="backDeadlines">חזור</button>
-      <button id="exportDeadlines">ייצא ליומן</button>
+      <button class="secondary" id="backDeadlines" data-i18n="btn.back">חזור</button>
+      <button id="exportDeadlines" data-i18n="btn.export.deadlines">ייצא ליומן</button>
     </div>
   </div>
 
   <div id="zoomPicker" style="display:none;">
-    <div class="summary">נמצאו <span class="count" id="totZoom">0</span> הקלטות. בחר אילו לפענח קישורים אליהן:</div>
+    <div class="summary"><span data-i18n="zoom.found.prefix">נמצאו</span> <span class="count" id="totZoom">0</span> <span data-i18n="zoom.found.suffix">הקלטות. בחר אילו לפענח קישורים אליהן:</span></div>
     <div class="toolbar">
-      <input id="searchZoom" type="search" placeholder="חיפוש בהקלטות...">
-      <a id="zoomAll">הכל</a>
-      <a id="zoomNone">ניקוי</a>
+      <input id="searchZoom" type="search" data-i18n-attr="placeholder:zoom.search.placeholder" placeholder="חיפוש בהקלטות...">
+      <a id="zoomAll" data-i18n="btn.select.all">הכל</a>
+      <a id="zoomNone" data-i18n="btn.select.none">ניקוי</a>
     </div>
-    <div class="summary"><span class="count" id="selZoom">0</span> נבחרו</div>
+    <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
     <ul class="courses" id="zoomItems"></ul>
     <div class="row-btns">
-      <button class="secondary" id="backZoom">חזור</button>
-      <button id="downloadZoom">פענח קישורים והורד</button>
+      <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
+      <button id="downloadZoom" data-i18n="btn.decode.zoom">פענח קישורים והורד</button>
     </div>
   </div>
 
@@ -449,6 +449,7 @@
 </main>
 
 <script src="settings.js"></script>
+<script src="i18n.js"></script>
 <script src="zip.js"></script>
 <script src="popup.js"></script>
 </body>

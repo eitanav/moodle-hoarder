@@ -135,6 +135,12 @@ function escapeHtml(s) {
   const settings = await getSettings();
   applyTheme(settings.theme);
   applyAccent(settings.accentColor);
+  // Resolve and apply UI language (ROADMAP #16). The options page is a
+  // tab — no active Moodle tab to sniff a course lang from — so 'auto'
+  // falls through to navigator.language.
+  if (typeof applyLanguage === 'function') {
+    applyLanguage(resolveLanguage(settings.uiLanguage, null));
+  }
 
   // toggles
   for (const input of $$('input.toggle')) {
@@ -153,6 +159,12 @@ function escapeHtml(s) {
     let onChange = null;
     if (key === 'theme') onChange = applyTheme;
     else if (key === 'accentColor') onChange = applyAccent;
+    else if (key === 'uiLanguage') {
+      // Live re-translate when the user picks a different language. 'auto'
+      // resolves against navigator.language here (no active Moodle tab in
+      // the options page).
+      onChange = (v) => applyLanguage(resolveLanguage(v, null));
+    }
     bindRadios(wrap, key, settings, onChange);
   }
 
