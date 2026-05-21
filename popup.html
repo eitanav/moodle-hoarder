@@ -266,6 +266,56 @@
     text-transform: uppercase;
   }
   .section-items .chip.new { background: var(--new-bg); color: var(--new-fg); }
+  /* File size chips (ROADMAP #19). Neutral by default; turns red when the
+     file is over the user's threshold and was therefore unchecked. */
+  .section-items .chip.size {
+    background: transparent;
+    color: var(--muted);
+    text-transform: none;
+    font-weight: 500;
+    border: 1px solid var(--border);
+  }
+  .section-items .chip.size.oversized {
+    background: #fde2e2;
+    color: #9a1212;
+    border-color: #f5b7b7;
+    font-weight: 600;
+  }
+  :root.mh-theme-dark .section-items .chip.size.oversized,
+  :root.mh-theme-dark .section-items .chip.size.oversized {
+    background: #4a1515;
+    color: #ffb0b0;
+    border-color: #8a2424;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.mh-theme-light) .section-items .chip.size.oversized {
+      background: #4a1515;
+      color: #ffb0b0;
+      border-color: #8a2424;
+    }
+  }
+  .section-items li.oversized .name { opacity: 0.7; }
+  /* Inline progress indicator while HEAD pre-scan is running. */
+  #sizeScanStatus {
+    display: none;
+    font-size: 11px;
+    color: var(--muted);
+    margin: 4px 0 6px 0;
+  }
+  #sizeScanStatus.show { display: block; }
+  #sizeScanStatus.show:not(.done)::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: -1px;
+    animation: mh-spin 0.8s linear infinite;
+  }
+  @keyframes mh-spin { to { transform: rotate(360deg); } }
 
   ul.courses { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
   ul.courses li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid var(--border); background: var(--row); }
@@ -338,6 +388,7 @@
       </div>
     </div>
     <div class="summary"><span class="count" id="selCount">0</span> מתוך <span id="totCount">0</span> נבחרו</div>
+    <div id="sizeScanStatus"></div>
     <div class="sections" id="sections"></div>
     <div class="row-btns">
       <button class="secondary" id="back">חזור</button>

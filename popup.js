@@ -557,6 +557,128 @@ function extractCourses(doc) {
   return courses;
 }
 
+// ========== File size pre-scan (ROADMAP #19) ==========
+// Format bytes as a short human label (e.g. "12.4MB", "850KB").
+function formatBytes(n) {
+  if (!n || n <= 0) return '';
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + 'KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + 'MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + 'GB';
+}
+
+// HEAD pre-scan only handles types where the size is meaningful and cheap
+// to discover (single file or single folder ZIP). For HTML-wrapped types
+// like assign/page/book, the size is the sum of attached files and we'd
+// have to scrape the page first — not worth it for a heads-up display.
+const SIZE_PROBE_TYPES = new Set(['resource', 'folder']);
+
+// Build the URL we should issue a HEAD against to learn an item's size.
+function sizeProbeUrl(item) {
+  if (item.type === 'resource') {
+    return item.url + (item.url.includes('?') ? '&' : '?') + 'redirect=1';
+  }
+  if (item.type === 'folder') {
+    try {
+      const u = new URL(item.url);
+      return `${u.origin}/mod/folder/download_folder.php?id=${item.id}`;
+    } catch { return null; }
+  }
+  return null;
+}
+
+// Probe the size of one item via HEAD. Returns bytes (number) or null if
+// the size could not be determined. Follows redirects (default fetch).
+// Falls back to a ranged GET (bytes=0-0) when HEAD is rejected — some
+// Moodle setups return 405 on HEAD but still report Content-Range on GET.
+async function probeItemSize(item) {
+  const url = sizeProbeUrl(item);
+  if (!url) return null;
+  try {
+    let res = await fetch(url, { method: 'HEAD', credentials: 'include' });
+    if (res.ok) {
+      const cl = +res.headers.get('Content-Length');
+      if (cl > 0) return cl;
+    }
+    // Fallback: ranged 1-byte GET. Server replies 206 with Content-Range:
+    // "bytes 0-0/<total>". Cheap and tolerant of HEAD-blocking setups.
+    res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Range': 'bytes=0-0' },
+    });
+    const cr = res.headers.get('Content-Range');
+    const m = cr && cr.match(/\/(\d+)/);
+    if (m) return +m[1];
+    const cl = +res.headers.get('Content-Length');
+    if (res.status === 200 && cl > 0) return cl;
+  } catch {}
+  return null;
+}
+
+// Runs probes for every probable item with a small concurrency pool so the
+// popup doesn't fire 50 simultaneous requests on a large course. Calls
+// `onSize(item, bytes)` per item — `bytes` may be null to mean "couldn't
+// determine, stop showing the spinner for this row".
+async function prefetchSizesForPicker(sections, onSize, onProgress) {
+  const queue = [];
+  for (const sec of sections) {
+    for (const it of sec.items) {
+      if (SIZE_PROBE_TYPES.has(it.type) && it.estimatedSize === undefined) {
+        queue.push(it);
+      }
+    }
+  }
+  const total = queue.length;
+  if (total === 0) return;
+  let done = 0;
+  const CONCURRENCY = 4;
+  let next = 0;
+  async function worker() {
+    while (next < queue.length) {
+      const item = queue[next++];
+      const size = await probeItemSize(item);
+      // Stash on the item so a re-render (search/sort) doesn't re-probe.
+      item.estimatedSize = (size == null) ? null : size;
+      try { onSize(item, size); } catch {}
+      done++;
+      try { onProgress?.(done, total); } catch {}
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+}
+
+// Updates one <li> in the picker to reflect a probed size.
+//   bytes > threshold (when threshold set) → red chip + uncheck + 'oversized' class
+//   bytes <= threshold or no threshold      → neutral chip with size label
+//   bytes == null                           → no chip (probe failed silently)
+function applySizeToLi(li, item, bytes) {
+  if (!li) return;
+  // Wipe any stale size chip from a previous render.
+  li.querySelectorAll('.chip.size').forEach(c => c.remove());
+  li.classList.remove('oversized');
+  if (bytes == null) return;
+  const chip = document.createElement('span');
+  chip.className = 'chip size';
+  chip.textContent = formatBytes(bytes);
+  // Insert at the end (after type chip and any "new" chip)
+  li.appendChild(chip);
+  const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
+  if (maxMB > 0 && bytes > maxMB * 1024 * 1024) {
+    chip.classList.add('oversized');
+    chip.title = `מעל ${maxMB}MB — סומן אדום ובוטלה בחירה. אפשר לסמן ידנית בכל זאת.`;
+    li.classList.add('oversized');
+    const cb = li.querySelector('input[type=checkbox]');
+    if (cb && cb.checked) {
+      cb.checked = false;
+      // Section master + count need to refresh after auto-uncheck.
+      const secDiv = li.closest('.section');
+      if (secDiv) updateSectionMaster(secDiv);
+      updateSelCount();
+    }
+  }
+}
+
 // ========== Picker rendering ==========
 function renderPicker() {
   showView('picker');
@@ -583,6 +705,7 @@ function renderPicker() {
       const status = diffStatus(scanned.prevSeen, item, defChecked);
       const li = document.createElement('li');
       li.dataset.idx = item.idx;
+      li.dataset.type = item.type;
       li.innerHTML = `
         <input type="checkbox" ${defChecked ? 'checked' : ''}>
         <span class="name"></span>
@@ -595,6 +718,11 @@ function renderPicker() {
         n.className = 'chip new';
         n.textContent = status;
         chip.after(n);
+      }
+      // If we already probed this item in a previous render, restore the
+      // size chip immediately (no flicker on search/sort).
+      if (item.estimatedSize != null) {
+        applySizeToLi(li, item, item.estimatedSize);
       }
       li.querySelector('input').addEventListener('change', () => {
         updateSectionMaster(secDiv);
@@ -642,6 +770,51 @@ function renderPicker() {
 
   updateSelCount();
   setStatus('');
+
+  // Kick off the HEAD pre-scan in the background. Only runs when the user
+  // configured a maxFileSizeMB — otherwise we don't bother with extra HTTP
+  // chatter (the sizes are nice-to-have, not core data).
+  const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
+  if (maxMB > 0) {
+    // Note: not reusing the top-level `statusEl` (#status) — this is a
+    // dedicated indicator above the section list.
+    const sizeStatusEl = document.getElementById('sizeScanStatus');
+    if (sizeStatusEl) {
+      sizeStatusEl.classList.add('show');
+      sizeStatusEl.classList.remove('done');
+      sizeStatusEl.style.color = '';
+      sizeStatusEl.textContent = 'בודק גדלי קבצים…';
+    }
+    prefetchSizesForPicker(
+      scanned.sections,
+      (item, bytes) => {
+        const li = sectionsEl.querySelector(`li[data-idx="${item.idx}"]`);
+        if (li) applySizeToLi(li, item, bytes);
+      },
+      (done, total) => {
+        if (sizeStatusEl) sizeStatusEl.textContent = `בודק גדלי קבצים… ${done}/${total}`;
+      },
+    ).then(() => {
+      if (!sizeStatusEl) return;
+      // Summarise oversized count after the scan finishes — keeps the user
+      // informed when items got auto-unchecked.
+      let over = 0;
+      for (const sec of scanned.sections) {
+        for (const it of sec.items) {
+          if (it.estimatedSize && it.estimatedSize > maxMB * 1024 * 1024) over++;
+        }
+      }
+      sizeStatusEl.classList.add('done');
+      if (over > 0) {
+        sizeStatusEl.textContent = `${over} קבצים מעל ${maxMB}MB סומנו באדום וביטלתי את הבחירה — אפשר לסמן ידנית.`;
+        sizeStatusEl.style.color = 'var(--err)';
+      } else {
+        sizeStatusEl.classList.remove('show');
+      }
+    }).catch(() => {
+      if (sizeStatusEl) { sizeStatusEl.classList.remove('show'); sizeStatusEl.classList.remove('done'); }
+    });
+  }
 }
 
 // Cached settings — loaded once at popup boot. The settings page writes
@@ -1385,15 +1558,11 @@ async function fetchResource(item) {
     res = await fetch(fileUrl, { credentials: 'include' });
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  // ROADMAP #19 — max file size warning. If the user set a threshold and the
-  // server reports Content-Length above it, skip the file with a clear error.
-  const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
-  if (maxMB > 0) {
-    const cl = +res.headers.get('Content-Length');
-    if (cl > 0 && cl > maxMB * 1024 * 1024) {
-      throw new Error(`קובץ ${(cl / 1024 / 1024).toFixed(1)}MB מעל סף ה-${maxMB}MB — דולג`);
-    }
-  }
+  // Note: the old hard-throw on Content-Length > maxFileSizeMB lived here.
+  // It now happens at picker time (HEAD pre-scan, ROADMAP #19) — the user
+  // sees an oversized red chip and the item is auto-unchecked. If they
+  // override and re-check it, they explicitly opted in, so we don't
+  // second-guess them with another size check mid-download.
   const blob = await res.blob();
   const fn = filenameFromResponse(res) || sanitizeFilename(item.name) || `resource_${item.id}`;
   return [{ path: fn, blob }];
@@ -1406,21 +1575,13 @@ async function fetchFolder(item) {
     const res = await fetch(dlUrl, { credentials: 'include' });
     const ct = (res.headers.get('Content-Type') || '').toLowerCase();
     if (res.ok && (ct.includes('zip') || ct.includes('octet-stream'))) {
-      const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
-      if (maxMB > 0) {
-        const cl = +res.headers.get('Content-Length');
-        if (cl > 0 && cl > maxMB * 1024 * 1024) {
-          throw new Error(`תיקייה ${(cl / 1024 / 1024).toFixed(1)}MB מעל סף ה-${maxMB}MB — דולג`);
-        }
-      }
+      // Size check happens at picker time now (ROADMAP #19). If the user
+      // re-checked an oversized folder, they explicitly opted in.
       const blob = await res.blob();
       const fn = filenameFromResponse(res) || (sanitizeFilename(item.name) + '.zip');
       return [{ path: fn, blob }];
     }
-  } catch (e) {
-    // If it's the size-threshold error we threw, propagate so the user sees it.
-    if (e.message && e.message.includes('סף')) throw e;
-  }
+  } catch {}
   // Fallback: scrape
   const res = await fetch(item.url, { credentials: 'include' });
   const html = await res.text();
