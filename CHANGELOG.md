@@ -4,6 +4,52 @@
 
 ---
 
+## v1.17.0 — הרחבת i18n + JSON export (ROADMAP #72)
+
+### הרחבת i18n לכל המחרוזות הדינמיות
+
+**הבעיה לפני:** v1.16.0 כיסה את ה-HTML הסטטי (כותרות, כפתורים, placeholders), אבל כל ה-`setStatus`/`logLine`/error messages שנוצרו דינמית ב-JS נשארו עברית. משתמש שבחר English ראה כפתורים באנגלית אבל "סורק..." בעברית.
+
+**הפתרון:**
+- `t()` שודרג לתמיכה ב-`{var}` substitution: `t('status.error.with.message', { msg: e.message })`.
+- כל ה-`setStatus` / `logLine` / `throw new Error` עם עברית הוחלפו לקריאות `t()`.
+- `content_dashboard.js` (הסקריפט שמזריק כפתורי "הסתר" ב-`/my/`) קיבל לוקליזציה מלאה. הוסף ל-`content_scripts` במניפסט יחד עם `settings.js` ו-`i18n.js`.
+- ב-init של ה-content script: טוען settings, פותר שפה (לפי `uiLanguage` או `<html lang>` של דף ה-Moodle), ומחיל לפני שהכפתורים מצורפים.
+- תרגום נוסף: באנרי diff (checkpoint / "X פריטים חדשים מאז"), tooltip של chip מעל הסף, chip ה-"חדש"/"לא בדיפולט", confirm של ניקוי תור, notifications, tooltips של פינים.
+- סה"כ ~50 מחרוזות נוספות תורגמו ל-en. הכיסוי כעת מלא (פרט לתוכן של קבצי ה-info.txt/links.txt בתוך ה-ZIP — נשארו עברית כי הם חלק ממבנה ה-ZIP יציב).
+
+### JSON export — `course.json` בתוך ה-ZIP
+
+**מה זה:** קובץ `course.json` חדש בתוך כל ZIP, עם dump מובנה של הקורס:
+```json
+{
+  "schema": "moodle-hoarder.course.v1",
+  "generator": "Moodle Hoarder",
+  "generatorVersion": "1.17.0",
+  "scannedAt": "2026-...",
+  "course": { "id": "12345", "name": "...", "url": "..." },
+  "counts": { "sections": 14, "items": 47, "links": 3, "recordings": 2, "events": 5, "errors": 0 },
+  "sections": [{ "index": 0, "name": "...", "itemCount": 3, "items": [...] }],
+  "links": [...],
+  "recordings": [...],
+  "events": [...],
+  "errors": [...]
+}
+```
+- כל item כולל: `id`, `type`, `name`, `url`, `sectionIdx`, `sectionName`, `sizeBytes` (מ-HEAD pre-scan כש-#19 פעיל; אחרת `null`).
+- כל recording/link/event נכלל עם metadata מינימלי.
+- ה-schema מסומן ב-version (`v1`) — אינטגרציות יכולות לזהות שינויים עתידיים.
+
+**למה זה שווה:**
+- אינטגרציה עם Notion/Anki/Sheets/Obsidian בלי לפרסר HTML.
+- סקריפטים חיצוניים (Python/Node) יכולים להסתמך על structured data.
+- diff ידני בין הורדות של אותו קורס לאורך זמן.
+- ה-JSON קטן (~10-50KB) ולא כולל את ה-blobs עצמם — שיתוף בטוח לחלוטין.
+
+**הגדרה חדשה:** `includeJson` — ברירת מחדל פעיל (toggle בעמוד ההגדרות תחת "תוכן").
+
+---
+
 ## v1.16.0 — i18n + טוגל שפת ממשק (ROADMAP #16)
 
 **הבעיה לפני:** הממשק היה בעברית קשיחה. סטודנט שמסתכל על קורס באנגלית, או משתמש שמעדיף ממשק באנגלית — לא קיבל בחירה. לא הייתה תשתית i18n בכלל.

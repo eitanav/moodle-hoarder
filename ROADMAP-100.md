@@ -81,7 +81,7 @@
 הסעיפים האלה לא בסומנים אבל הכי שווים בעיני להכין אחר כך:
 
 1. **#80 — service worker downloads.** הכי משפיע. הופך את "אל תסגור את הפופאפ" לעבר. (L, ROI עצום) — ראה [MIGRATION-80.md](MIGRATION-80.md).
-2. **#72 — JSON export.** קטן (S), פותח שלל אינטגרציות (Notion, Anki, Sheets).
+2. ✅✅ **#72 — JSON export.** **מומש ב-v1.17.0** — `course.json` עם schema v1 (sections, items, types, sizes, links, recordings, events, errors). טוגל בהגדרות "כלילת course.json", ברירת מחדל פעיל.
 3. **#82 — pause / resume בזמן ריצה.** קורסים גדולים יהיו אמינים יותר. (M)
 4. **#28 — quiz attempts archive.** value-add ייחודי לסטודנט. (M)
 5. **#22 — מיזוג PDFים רב-חלקיים.** (L)

@@ -90,6 +90,65 @@ const MH_STRINGS = {
     'status.zipping': 'יוצר ZIP...',
     'status.done': 'הושלם',
     'status.error': 'שגיאה',
+
+    // Dynamic status (popup.js setStatus + logLine)
+    'status.opening.activities': 'פותח את כל הפעילויות...',
+    'status.scanning.deadlines': 'סורק דדליינים...',
+    'status.no.deadlines': 'לא נמצאו מטלות. ודא שטעון "ממתין לביצוע" ונסה שוב.',
+    'status.error.with.message': 'שגיאה: {msg}',
+    'status.downloading.queue': 'מוריד {n} פריטים בתור...',
+    'status.queue.failed': 'כשל בהורדת התור.',
+    'status.zipping.bundle': 'מארז ZIP...',
+    'status.completed.with.count': 'הושלם: {n} פריטים, {size}.',
+    'status.checking.page': 'בודק עמוד...',
+    'status.waiting.zoom': 'ממתין שדף ה-Zoom ייטען...',
+    'status.no.zoom': 'לא נמצאו הקלטות. ראה את הקובץ שירד לפרטים.',
+    'status.scanning.courses': 'סורק קורסים...',
+    'status.no.courses': 'לא נמצאו קורסים. גלול מטה כדי שכל הקורסים יטענו ונסה שוב.',
+    'status.scanning.course': 'סורק קורס...',
+    'status.no.items': 'לא נמצאו פריטים בדף.',
+    'status.wrong.page': 'יש לעבור לדף קורס במודל אריאל או לדף "הקורסים שלי".',
+    'status.zoom.start': 'מתחיל פענוח קישורים ל-{n} הקלטות — אל תסגור!',
+    'status.zoom.no.urls': 'לא נמצאו URLs. הורד גם zoom-detail-debug HTML.',
+    'status.zoom.results': 'הושלם: {ok}/{total} קישורים נמצאו.',
+    'status.completed': 'הושלם.',
+    'status.downloading.parallel': 'מוריד {n} פריטים במקביל (עד {c} בו-זמנית)...',
+    'status.no.deadlines.selected': 'בחר לפחות מטלה אחת עם תאריך הגשה.',
+    'status.exported.deadlines': 'יוצאו {n} מטלות ל-ICS.',
+    'log.nothing.to.download': '— {name}: אין מה להוריד',
+    'log.course.items': '✓ {name}: {n} פריטים',
+    'log.grades.failed': '✗ שליפת ציונים: {msg}',
+    'err.no.active.tab': 'אין טאב פעיל',
+    'err.file.not.found': 'לא נמצא קובץ',
+    'err.folder.empty': 'תיקייה ריקה / חסומה',
+
+    // Confirm dialogs, notifications, diff banners
+    'queue.clear.confirm': 'לרוקן את התור?',
+    'notif.queue.done': '{n} פריטים מהתור הורדו',
+    'notif.multi.done': 'הסתיימה הורדת {n} קורסים',
+    'notif.course.done': 'הורדו {n} פריטים מ-"{name}"',
+    'size.over.tooltip': 'מעל {mb}MB — סומן אדום ובוטלה בחירה. אפשר לסמן ידנית בכל זאת.',
+    'size.checking': 'בודק גדלי קבצים…',
+    'size.checking.progress': 'בודק גדלי קבצים… {done}/{total}',
+    'size.summary.over': '{n} קבצים מעל {mb}MB סומנו באדום וביטלתי את הבחירה — אפשר לסמן ידנית.',
+    'diff.checkpoint': 'נמצאה הורדה לא-גמורה מ-{date} ({n} פריטים כבר ירדו). הם יישמרו וההורדה תמשיך משם.',
+    'diff.previous': 'נמצאה הורדה קודמת מתאריך {date} — {n} פריטים חדשים מאז.',
+    'diff.chip.new': 'חדש',
+    'diff.chip.notdefault': 'לא בדיפולט',
+    'multi.pin.title': 'בטל הצמדה',
+    'multi.unpin.title': 'הצמד למעלה',
+
+    // content_dashboard.js — buttons injected into the Moodle dashboard
+    'dash.hide': 'הסתר',
+    'dash.hide.title': 'הסתר מטלה זו (Moodle Hoarder)',
+    'dash.unhide': 'החזר',
+    'dash.unhide.title': 'החזר מטלה זו לרשימה',
+    'dash.clear.all': 'בטל הכל',
+    'dash.clear.all.title': 'החזר את כל המטלות המוסתרות לרשימה',
+    'dash.clear.all.confirm': 'להחזיר את כל {n} המטלות המוסתרות לרשימה?',
+    'dash.count.hidden': '{n} מטלות מוסתרות',
+    'dash.show.hidden': 'הצג מוסתרות',
+    'dash.hide.again': 'הסתר שוב',
   },
   en: {
     'app.title': 'Moodle Hoarder',
@@ -152,6 +211,62 @@ const MH_STRINGS = {
     'status.zipping': 'Building ZIP...',
     'status.done': 'Done',
     'status.error': 'Error',
+
+    'status.opening.activities': 'Opening all activities...',
+    'status.scanning.deadlines': 'Scanning deadlines...',
+    'status.no.deadlines': 'No assignments found. Make sure "Timeline" is loaded and try again.',
+    'status.error.with.message': 'Error: {msg}',
+    'status.downloading.queue': 'Downloading {n} queued items...',
+    'status.queue.failed': 'Queue download failed.',
+    'status.zipping.bundle': 'Packaging ZIP...',
+    'status.completed.with.count': 'Done: {n} items, {size}.',
+    'status.checking.page': 'Checking page...',
+    'status.waiting.zoom': 'Waiting for the Zoom page to load...',
+    'status.no.zoom': 'No recordings found. See the downloaded file for details.',
+    'status.scanning.courses': 'Scanning courses...',
+    'status.no.courses': 'No courses found. Scroll down so all courses load, then retry.',
+    'status.scanning.course': 'Scanning course...',
+    'status.no.items': 'No items found on the page.',
+    'status.wrong.page': 'Please open a Moodle course page or the "My courses" page.',
+    'status.zoom.start': 'Resolving URLs for {n} recordings — do not close!',
+    'status.zoom.no.urls': 'No URLs found. Download the zoom-detail-debug HTML too.',
+    'status.zoom.results': 'Done: {ok}/{total} URLs resolved.',
+    'status.completed': 'Done.',
+    'status.downloading.parallel': 'Downloading {n} items in parallel (up to {c} at a time)...',
+    'status.no.deadlines.selected': 'Pick at least one assignment with a due date.',
+    'status.exported.deadlines': 'Exported {n} assignments to ICS.',
+    'log.nothing.to.download': '— {name}: nothing to download',
+    'log.course.items': '✓ {name}: {n} items',
+    'log.grades.failed': '✗ Grades fetch: {msg}',
+    'err.no.active.tab': 'No active tab',
+    'err.file.not.found': 'No file found',
+    'err.folder.empty': 'Empty / blocked folder',
+
+    'queue.clear.confirm': 'Empty the queue?',
+    'notif.queue.done': '{n} queued items downloaded',
+    'notif.multi.done': 'Finished downloading {n} courses',
+    'notif.course.done': 'Downloaded {n} items from "{name}"',
+    'size.over.tooltip': 'Over {mb}MB — marked red and unchecked. You can still check it manually.',
+    'size.checking': 'Checking file sizes…',
+    'size.checking.progress': 'Checking file sizes… {done}/{total}',
+    'size.summary.over': '{n} files over {mb}MB were marked red and unchecked — you can re-check manually.',
+    'diff.checkpoint': 'Incomplete download from {date} found ({n} items already saved). They will be kept and the download will resume.',
+    'diff.previous': 'Previous download from {date} — {n} new items since.',
+    'diff.chip.new': 'new',
+    'diff.chip.notdefault': 'non-default',
+    'multi.pin.title': 'Unpin',
+    'multi.unpin.title': 'Pin to top',
+
+    'dash.hide': 'Hide',
+    'dash.hide.title': 'Hide this assignment (Moodle Hoarder)',
+    'dash.unhide': 'Restore',
+    'dash.unhide.title': 'Restore this assignment to the list',
+    'dash.clear.all': 'Clear all',
+    'dash.clear.all.title': 'Restore all hidden assignments to the list',
+    'dash.clear.all.confirm': 'Restore all {n} hidden assignments?',
+    'dash.count.hidden': '{n} assignments hidden',
+    'dash.show.hidden': 'Show hidden',
+    'dash.hide.again': 'Hide again',
   },
 };
 
@@ -188,12 +303,19 @@ function resolveLanguage(uiLanguageSetting, courseLang) {
   return detectAutoLanguage(courseLang);
 }
 
-// Translate a key. Falls back to English then to the key itself.
-function t(key) {
+// Translate a key with optional `{var}` substitution.
+//   t('foo')                  → 'Hello'
+//   t('foo', { n: 5 })        → 'Hello 5' (when 'foo' = 'Hello {n}')
+// Falls back to English then to the key itself.
+function t(key, vars) {
   const lang = MH_CURRENT_LANG;
-  return (MH_STRINGS[lang] && MH_STRINGS[lang][key])
-      || (MH_STRINGS.en && MH_STRINGS.en[key])
-      || key;
+  let str = (MH_STRINGS[lang] && MH_STRINGS[lang][key])
+        || (MH_STRINGS.en && MH_STRINGS.en[key])
+        || key;
+  if (vars && typeof str === 'string') {
+    str = str.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? vars[name] : m));
+  }
+  return str;
 }
 
 // Apply the language to <html lang>, <html dir>, and all elements with

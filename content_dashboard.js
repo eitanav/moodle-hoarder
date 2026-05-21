@@ -191,8 +191,8 @@
     btn.className = 'mh-btn mh-hide-btn';
     btn.dataset.mhBtnFor = id;
     btn.type = 'button';
-    btn.textContent = 'הסתר';
-    btn.title = 'הסתר מטלה זו (Moodle Hoarder)';
+    btn.textContent = t('dash.hide');
+    btn.title = t('dash.hide.title');
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -238,13 +238,13 @@
       if (isH && showHidden) {
         btn.classList.remove('mh-hide-btn');
         btn.classList.add('mh-btn-unhide');
-        btn.textContent = 'החזר';
-        btn.title = 'החזר מטלה זו לרשימה';
+        btn.textContent = t('dash.unhide');
+        btn.title = t('dash.unhide.title');
       } else {
         btn.classList.remove('mh-btn-unhide');
         btn.classList.add('mh-hide-btn');
-        btn.textContent = 'הסתר';
-        btn.title = 'הסתר מטלה זו (Moodle Hoarder)';
+        btn.textContent = t('dash.hide');
+        btn.title = t('dash.hide.title');
       }
     }
   }
@@ -287,11 +287,11 @@
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
     clearBtn.className = 'mh-bar-btn';
-    clearBtn.textContent = 'בטל הכל';
-    clearBtn.title = 'החזר את כל המטלות המוסתרות לרשימה';
+    clearBtn.textContent = t('dash.clear.all');
+    clearBtn.title = t('dash.clear.all.title');
     clearBtn.addEventListener('click', async () => {
       if (hidden.size === 0) return;
-      if (!confirm(`להחזיר את כל ${hidden.size} המטלות המוסתרות לרשימה?`)) return;
+      if (!confirm(t('dash.clear.all.confirm', { n: hidden.size }))) return;
       hidden.clear();
       await saveHidden();
       showHidden = false;
@@ -322,8 +322,8 @@
     }
     const refs = ensureToggleBar();
     if (!refs) return;
-    refs.label.textContent = `${hidden.size} מטלות מוסתרות`;
-    refs.showBtn.textContent = showHidden ? 'הסתר שוב' : 'הצג מוסתרות';
+    refs.label.textContent = t('dash.count.hidden', { n: hidden.size });
+    refs.showBtn.textContent = showHidden ? t('dash.hide.again') : t('dash.show.hidden');
   }
 
   // ---- main loop + mutation-observer suppression ----
@@ -360,6 +360,15 @@
   }
 
   async function init() {
+    // Resolve UI language from settings before any user-visible string
+    // is rendered. The course's <html lang> serves as the 'auto' source.
+    try {
+      if (typeof getSettings === 'function' && typeof applyLanguage === 'function') {
+        const s = await getSettings();
+        const courseLang = document.documentElement.getAttribute('lang') || '';
+        applyLanguage(resolveLanguage(s.uiLanguage, courseLang));
+      }
+    } catch {}
     injectStyle();
     await loadHidden();
     process();

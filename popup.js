@@ -146,13 +146,13 @@ document.addEventListener('keydown', (e) => {
 // (in case the auto-scan needs to be retried).
 async function runDashboardScan(tab) {
   $('scan').disabled = true;
-  setStatus('פותח את כל הפעילויות...');
+  setStatus(t('status.opening.activities'));
   try {
     await expandTimelineActivities(tab.id);
-    setStatus('סורק דדליינים...');
+    setStatus(t('status.scanning.deadlines'));
     const deadlines = await scanDeadlinesInActiveTab(tab.id);
     if (!deadlines.length) {
-      setStatus('לא נמצאו מטלות. ודא שטעון "ממתין לביצוע" ונסה שוב.');
+      setStatus(t('status.no.deadlines'));
       $('scan').disabled = false;
       return;
     }
@@ -168,7 +168,7 @@ async function runDashboardScan(tab) {
     });
     renderDeadlines();
   } catch (e) {
-    setStatus('שגיאה: ' + e.message);
+    setStatus(t('status.error.with.message', { msg: e.message }));
     $('scan').disabled = false;
   }
 }
@@ -236,7 +236,7 @@ async function refreshQueueArea() {
 }
 
 document.getElementById('clearQueue')?.addEventListener('click', async () => {
-  if (!confirm('לרוקן את התור?')) return;
+  if (!confirm(t('queue.clear.confirm'))) return;
   await setQueue([]);
   await refreshQueueArea();
 });
@@ -245,7 +245,7 @@ document.getElementById('downloadQueue')?.addEventListener('click', async () => 
   const q = await getQueue();
   if (!q.length) return;
   document.getElementById('downloadQueue').disabled = true;
-  setStatus(`מוריד ${q.length} פריטים בתור...`);
+  setStatus(t('status.downloading.queue', { n: q.length }));
   setProgress(0, q.length);
   const files = [];
   const used = new Set();
@@ -268,19 +268,19 @@ document.getElementById('downloadQueue')?.addEventListener('click', async () => 
     }
   }
   if (!files.length) {
-    setStatus('כשל בהורדת התור.');
+    setStatus(t('status.queue.failed'));
     document.getElementById('downloadQueue').disabled = false;
     return;
   }
-  setStatus('מארז ZIP...');
+  setStatus(t('status.zipping.bundle'));
   const zipBlob = await buildZip(files);
   const url = URL.createObjectURL(zipBlob);
   const filename = `moodle-hoarder-queue-${new Date().toISOString().slice(0, 10)}.zip`;
   await chrome.downloads.download({ url, filename, saveAs: !!CACHED_SETTINGS?.saveAs });
   await setQueue([]);
   await refreshQueueArea();
-  setStatus(`הושלם: ${files.length} פריטים, ${formatSize(zipBlob.size)}.`);
-  notify('Moodle Hoarder', `הורדו ${files.length} פריטים מהתור`);
+  setStatus(t('status.completed.with.count', { n: files.length, size: formatSize(zipBlob.size) }));
+  notify('Moodle Hoarder', t('notif.queue.done', { n: files.length }));
   document.getElementById('downloadQueue').disabled = false;
 });
 
@@ -293,17 +293,17 @@ function setSkeleton(show) {
 $('scan').addEventListener('click', async () => {
   $('scan').disabled = true;
   setSkeleton(true);
-  setStatus('בודק עמוד...');
+  setStatus(t('status.checking.page'));
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url) throw new Error('אין טאב פעיל');
+    if (!tab?.url) throw new Error(t('err.no.active.tab'));
 
     if (/zoom\.us/.test(tab.url)) {
-      setStatus('ממתין שדף ה-Zoom ייטען...');
+      setStatus(t('status.waiting.zoom'));
       const data = await scrapeAllZoomPages(tab.id, (s) => setStatus(s));
       if (data.recordings.length === 0) {
         await saveZoomFile(data);
-        setStatus('לא נמצאו הקלטות. ראה את הקובץ שירד לפרטים.');
+        setStatus(t('status.no.zoom'));
         $('scan').disabled = false;
         return;
       }
@@ -311,13 +311,13 @@ $('scan').addEventListener('click', async () => {
       renderZoomPicker();
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/my\/courses\.php/.test(tab.url)) {
-      setStatus('סורק קורסים...');
+      setStatus(t('status.scanning.courses'));
       // Moodle 4.x's "My Courses" page renders the cards via JS after page
       // load, so fetching the URL fresh returns an empty skeleton. Read the
       // live DOM from the active tab instead.
       const courses = await scanCoursesInActiveTab(tab.id);
       if (!courses.length) {
-        setStatus('לא נמצאו קורסים. גלול מטה כדי שכל הקורסים יטענו ונסה שוב.');
+        setStatus(t('status.no.courses'));
         $('scan').disabled = false;
         return;
       }
@@ -328,20 +328,20 @@ $('scan').addEventListener('click', async () => {
       await runDashboardScan(tab);
       return;
     } else if (/moodlearn\.ariel\.ac\.il\/course\/view\.php/.test(tab.url)) {
-      setStatus('סורק קורס...');
+      setStatus(t('status.scanning.course'));
       scanned = await scanCourse(tab.url);
       if (!scanned.sections.length) {
-        setStatus('לא נמצאו פריטים בדף.');
+        setStatus(t('status.no.items'));
         $('scan').disabled = false;
         return;
       }
       renderPicker();
     } else {
-      setStatus('יש לעבור לדף קורס במודל אריאל או לדף "הקורסים שלי".');
+      setStatus(t('status.wrong.page'));
       $('scan').disabled = false;
     }
   } catch (e) {
-    setStatus('שגיאה: ' + e.message);
+    setStatus(t('status.error.with.message', { msg: e.message }));
     $('scan').disabled = false;
   } finally {
     setSkeleton(false);
@@ -666,7 +666,7 @@ function applySizeToLi(li, item, bytes) {
   const maxMB = CACHED_SETTINGS?.maxFileSizeMB || 0;
   if (maxMB > 0 && bytes > maxMB * 1024 * 1024) {
     chip.classList.add('oversized');
-    chip.title = `מעל ${maxMB}MB — סומן אדום ובוטלה בחירה. אפשר לסמן ידנית בכל זאת.`;
+    chip.title = t('size.over.tooltip', { mb: maxMB });
     li.classList.add('oversized');
     const cb = li.querySelector('input[type=checkbox]');
     if (cb && cb.checked) {
@@ -755,13 +755,13 @@ function renderPicker() {
     const ckpt = scanned.courseId ? await loadCheckpoint(scanned.courseId) : null;
     if (ckpt && Object.keys(ckpt.results || {}).length) {
       const cachedCount = Object.keys(ckpt.results).length;
-      diffText.textContent = `נמצאה הורדה לא-גמורה מ-${formatDateShort(ckpt.startedAt)} (${cachedCount} פריטים כבר ירדו). הם יישמרו וההורדה תמשיך משם.`;
+      diffText.textContent = t('diff.checkpoint', { date: formatDateShort(ckpt.startedAt), n: cachedCount });
       diffBanner.classList.add('show');
       return;
     }
     if (scanned.prevSeen && scanned.prevSeen.items?.length) {
       const newCount = countNew();
-      diffText.textContent = `נמצאה הורדה קודמת מתאריך ${formatDateShort(scanned.prevSeen.lastDownload)} — ${newCount} פריטים חדשים מאז.`;
+      diffText.textContent = t('diff.previous', { date: formatDateShort(scanned.prevSeen.lastDownload), n: newCount });
       diffBanner.classList.add('show');
     } else {
       diffBanner.classList.remove('show');
@@ -783,7 +783,7 @@ function renderPicker() {
       sizeStatusEl.classList.add('show');
       sizeStatusEl.classList.remove('done');
       sizeStatusEl.style.color = '';
-      sizeStatusEl.textContent = 'בודק גדלי קבצים…';
+      sizeStatusEl.textContent = t('size.checking');
     }
     prefetchSizesForPicker(
       scanned.sections,
@@ -792,7 +792,7 @@ function renderPicker() {
         if (li) applySizeToLi(li, item, bytes);
       },
       (done, total) => {
-        if (sizeStatusEl) sizeStatusEl.textContent = `בודק גדלי קבצים… ${done}/${total}`;
+        if (sizeStatusEl) sizeStatusEl.textContent = t('size.checking.progress', { done, total });
       },
     ).then(() => {
       if (!sizeStatusEl) return;
@@ -806,7 +806,7 @@ function renderPicker() {
       }
       sizeStatusEl.classList.add('done');
       if (over > 0) {
-        sizeStatusEl.textContent = `${over} קבצים מעל ${maxMB}MB סומנו באדום וביטלתי את הבחירה — אפשר לסמן ידנית.`;
+        sizeStatusEl.textContent = t('size.summary.over', { n: over, mb: maxMB });
         sizeStatusEl.style.color = 'var(--err)';
       } else {
         sizeStatusEl.classList.remove('show');
@@ -876,13 +876,13 @@ function diffStatus(prev, item, defChecked) {
   const seen = prev.items.find(p => p.type === item.type && p.id === item.id);
   if (seen) return '';
   // Not seen before — either truly new, or simply not part of the default selection.
-  return defChecked ? 'חדש' : 'לא בדיפולט';
+  return defChecked ? t('diff.chip.new') : t('diff.chip.notdefault');
 }
 
 function countNew() {
   let n = 0;
   scanned.sections.forEach((sec, sIdx) => sec.items.forEach(it => {
-    if (diffStatus(scanned.prevSeen, it, defaultChecked(it, sIdx)) === 'חדש') n++;
+    if (diffStatus(scanned.prevSeen, it, defaultChecked(it, sIdx)) === t('diff.chip.new')) n++;
   }));
   return n;
 }
@@ -1044,7 +1044,7 @@ async function renderMulti() {
         <div class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
         <div class="id">ID ${c.id}${(clicks[c.id] || 0) > 0 ? ` · ${clicks[c.id]} הורדות` : ''}</div>
       </div>
-      <button class="mh-pin" title="${isPinned ? 'בטל הצמדה' : 'הצמד למעלה'}" style="background:transparent;border:none;cursor:pointer;font-size:16px;width:auto;padding:4px;color:${isPinned ? 'var(--accent)' : 'var(--muted)'}">${isPinned ? '📌' : '📍'}</button>`;
+      <button class="mh-pin" title="${isPinned ? t('multi.pin.title') : t('multi.unpin.title')}" style="background:transparent;border:none;cursor:pointer;font-size:16px;width:auto;padding:4px;color:${isPinned ? 'var(--accent)' : 'var(--muted)'}">${isPinned ? '📌' : '📍'}</button>`;
     li.querySelector('.name').textContent = c.name;
     li.querySelector('input').addEventListener('change', updateCourseCount);
     li.querySelector('.mh-pin').addEventListener('click', async (e) => {
@@ -1149,7 +1149,7 @@ $('downloadZoom').addEventListener('click', async () => {
     checkedIds.has(`${r.meetingId || ''}|${r.date || ''}|${(r.topic || '').slice(0, 30)}`));
   if (!selected.length) { $('backZoom').disabled = false; return; }
 
-  setStatus(`מתחיל פענוח קישורים ל-${selected.length} הקלטות — אל תסגור!`);
+  setStatus(t('status.zoom.start', { n: selected.length }));
   const debugHtml = await resolveZoomPlayUrls(zoomScanned.tabId, selected, (s) => setStatus(s));
 
   // Output file contains only the selected recordings
@@ -1167,9 +1167,9 @@ $('downloadZoom').addEventListener('click', async () => {
       filename: `zoom-detail-debug_${date}.html`,
       saveAs: false,
     });
-    setStatus(`לא נמצאו URLs. הורד גם zoom-detail-debug HTML.`);
+    setStatus(t('status.zoom.no.urls'));
   } else {
-    setStatus(`הושלם: ${ok}/${selected.length} קישורים נמצאו.`);
+    setStatus(t('status.zoom.results', { ok, total: selected.length }));
   }
   notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
   $('backZoom').disabled = false;
@@ -1222,7 +1222,7 @@ $('downloadMulti').addEventListener('click', async () => {
         if (onlyNew && isPreviouslySeen(data.prevSeen, it)) return;
         if (defaultChecked(it, sIdx)) items.push(it);
       }));
-      if (!items.length) { logLine(`— ${c.name}: אין מה להוריד`, 'ok'); continue; }
+      if (!items.length) { logLine(t('log.nothing.to.download', { name: c.name }), 'ok'); continue; }
       await runDownload({
         courseName: data.courseName,
         courseId: data.courseId,
@@ -1230,14 +1230,14 @@ $('downloadMulti').addEventListener('click', async () => {
         items,
         silent: true,
       });
-      logLine(`✓ ${c.name}: ${items.length} פריטים`, 'ok');
+      logLine(t('log.course.items', { name: c.name, n: items.length }), 'ok');
     } catch (e) {
       logLine(`✗ ${c.name}: ${e.message}`, 'err');
     }
   }
-  setStatus('הושלם.');
+  setStatus(t('status.completed'));
   setProgress(0, 0);
-  notify('Moodle Hoarder', `הסתיימה הורדת ${wanted.length} קורסים`);
+  notify('Moodle Hoarder', t('notif.multi.done', { n: wanted.length }));
   $('backMulti').disabled = false;
 });
 
@@ -1376,7 +1376,7 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   const used = new Set();
 
   // Phase 1: parallel fetch with checkpoint resume on courseId.
-  setStatus(`מוריד ${items.length} פריטים במקביל (עד ${CONCURRENT_DOWNLOADS} בו-זמנית)...`);
+  setStatus(t('status.downloading.parallel', { n: items.length, c: CONCURRENT_DOWNLOADS }));
   const { results, errors } = await fetchItemsParallel(items, CONCURRENT_DOWNLOADS,
     (done, total, item, fromCache) => {
       const prefix = fromCache ? '↻' : '✓';
@@ -1441,13 +1441,26 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
       const csv = await fetchGradesCsv(courseId);
       if (csv) files.push({ path: 'ציונים.csv', blob: textBlob(csv, 'text/csv;charset=utf-8') });
     } catch (e) {
-      if (!silent) logLine(`✗ שליפת ציונים: ${e.message}`, 'err');
+      if (!silent) logLine(t('log.grades.failed', { msg: e.message }), 'err');
     }
   }
   const info = buildInfo({ courseName, courseUrl, items, files, links, recordings, events, errors });
   files.push({ path: 'info.txt', blob: textBlob(info) });
 
-  setStatus(`מארז ZIP...`);
+  // Structured machine-readable dump of the course (ROADMAP #72).
+  // Doesn't include the file blobs themselves — just metadata — so it's
+  // safe to share separately and small enough to add to every ZIP.
+  if (CACHED_SETTINGS?.includeJson !== false) {
+    const courseJson = buildCourseJson({
+      courseName, courseId, courseUrl, items,
+      sections: scanned?.sections || null,
+      links, recordings, events, errors,
+    });
+    // No BOM here — strict JSON parsers reject it.
+    files.push({ path: 'course.json', blob: new Blob([courseJson], { type: 'application/json;charset=utf-8' }) });
+  }
+
+  setStatus(t('status.zipping.bundle'));
   setProgress(items.length, items.length);
 
   const zipBlob = await buildZip(files);
@@ -1466,8 +1479,8 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
     await bumpCourseClick(courseId);
   }
 
-  setStatus(`הושלם: ${files.length} פריטים, ${formatSize(zipBlob.size)}.`);
-  if (!silent) notify('Moodle Hoarder', `הורדו ${files.length} פריטים מ-"${courseName}"`);
+  setStatus(t('status.completed.with.count', { n: files.length, size: formatSize(zipBlob.size) }));
+  if (!silent) notify('Moodle Hoarder', t('notif.course.done', { n: files.length, name: courseName }));
 }
 
 function buildInfo({ courseName, courseUrl, items, files, links, recordings, events, errors }) {
@@ -1497,6 +1510,76 @@ function formatLinkList(arr, title) {
   const lines = [title, '='.repeat(title.length), ''];
   for (const l of arr) lines.push(`[${l.type || 'url'}] ${l.name}\n${l.url}\n`);
   return lines.join('\r\n');
+}
+
+// Machine-readable course dump (ROADMAP #72). Intentionally NOT bundling
+// the file blobs — this is a metadata sidecar. Schema is versioned so
+// downstream tools can detect breaks.
+function buildCourseJson({ courseName, courseId, courseUrl, items, sections, links, recordings, events, errors }) {
+  // Group items by sectionIdx for the nested structure, but also expose
+  // a flat `items` array (callers can use whichever is easier).
+  const sectionMap = new Map();
+  for (const it of items) {
+    const sIdx = it.sectionIdx ?? 0;
+    if (!sectionMap.has(sIdx)) sectionMap.set(sIdx, []);
+    sectionMap.get(sIdx).push({
+      id: it.id,
+      type: it.type,
+      name: it.name,
+      url: it.url,
+      sectionIdx: sIdx,
+      sectionName: it.section || null,
+      // Populated by the HEAD pre-scan (ROADMAP #19), may be null when
+      // size couldn't be determined or the user disabled the scan.
+      sizeBytes: (typeof it.estimatedSize === 'number') ? it.estimatedSize : null,
+    });
+  }
+  const sectionsOut = [];
+  // Preserve scan order — use the scanned `sections` array if available,
+  // otherwise fall back to sectionMap iteration order.
+  if (Array.isArray(sections)) {
+    sections.forEach((sec, sIdx) => {
+      const its = sectionMap.get(sIdx) || [];
+      sectionsOut.push({ index: sIdx, name: sec.name, itemCount: its.length, items: its });
+    });
+  } else {
+    for (const [sIdx, its] of sectionMap.entries()) {
+      sectionsOut.push({ index: sIdx, name: its[0]?.sectionName || null, itemCount: its.length, items: its });
+    }
+  }
+  return JSON.stringify({
+    schema: 'moodle-hoarder.course.v1',
+    generator: 'Moodle Hoarder',
+    generatorVersion: chrome.runtime.getManifest?.()?.version || null,
+    scannedAt: new Date().toISOString(),
+    course: {
+      id: courseId || null,
+      name: courseName,
+      url: courseUrl,
+    },
+    counts: {
+      sections: sectionsOut.length,
+      items: items.length,
+      links: links.length,
+      recordings: recordings.length,
+      events: events.length,
+      errors: errors?.length || 0,
+    },
+    sections: sectionsOut,
+    links: links.map(l => ({ name: l.name, type: l.type || 'url', url: l.url })),
+    recordings: recordings.map(r => ({ name: r.name, type: r.type || 'recording', url: r.url })),
+    events: events.map(e => ({
+      title: e.summary || null,
+      start: e.start instanceof Date ? e.start.toISOString() : e.start || null,
+      url: e.url || null,
+    })),
+    errors: (errors || []).map(({ item, err }) => ({
+      type: item?.type,
+      id: item?.id,
+      name: item?.name,
+      message: err,
+    })),
+  }, null, 2);
 }
 
 function textBlob(s, type = 'text/plain;charset=utf-8') {
@@ -1573,7 +1656,7 @@ async function fetchResource(item) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const link = doc.querySelector('a[href*="pluginfile.php"], object[data*="pluginfile.php"], iframe[src*="pluginfile.php"]');
     const fileUrl = link?.href || link?.getAttribute?.('data') || link?.src;
-    if (!fileUrl) throw new Error('לא נמצא קובץ');
+    if (!fileUrl) throw new Error(t('err.file.not.found'));
     res = await fetch(fileUrl, { credentials: 'include' });
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1616,7 +1699,7 @@ async function fetchFolder(item) {
       out.push({ path: `${folder}/${fn}`, blob });
     } catch {}
   }
-  if (!out.length) throw new Error('תיקייה ריקה / חסומה');
+  if (!out.length) throw new Error(t('err.folder.empty'));
   return out;
 }
 
@@ -3095,7 +3178,7 @@ document.getElementById('exportDeadlines')?.addEventListener('click', async () =
   );
   const selected = deadlinesScanned.deadlines.filter(d => checked.has(d.id) && d.due);
   if (!selected.length) {
-    setStatus('בחר לפחות מטלה אחת עם תאריך הגשה.');
+    setStatus(t('status.no.deadlines.selected'));
     return;
   }
 
@@ -3120,6 +3203,6 @@ document.getElementById('exportDeadlines')?.addEventListener('click', async () =
     },
   });
 
-  setStatus(`יוצאו ${selected.length} מטלות ל-ICS.`);
+  setStatus(t('status.exported.deadlines', { n: selected.length }));
   notify('Moodle Hoarder', `${selected.length} מטלות נשמרו ליומן`);
 });

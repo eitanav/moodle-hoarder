@@ -72,6 +72,12 @@ const SETTINGS_DEFAULTS = {
   // <html lang> (falls back to navigator.language and finally Hebrew).
   // 'he' or 'en' = force.
   uiLanguage: 'auto',
+
+  // Include course.json in the ZIP (ROADMAP #72). A structured dump of
+  // the course (sections, items, types, URLs, sizes) — opens easy
+  // integration with Notion / Anki / Sheets / scripts. Defaults to true:
+  // it's small, useful, and doesn't leak anything the ZIP doesn't already.
+  includeJson: true,
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply
