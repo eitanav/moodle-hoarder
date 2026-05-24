@@ -1152,9 +1152,18 @@ $('downloadZoom').addEventListener('click', async () => {
   setStatus(t('status.zoom.start', { n: selected.length }));
   const debugHtml = await resolveZoomPlayUrls(zoomScanned.tabId, selected, (s) => setStatus(s));
 
-  // Output file contains only the selected recordings
+  // Output file contains only the selected recordings.
+  // When transcripts will be extracted (Phase 1), skip the standalone TXT
+  // download — the same content goes into the ZIP as הקלטות.txt and a
+  // separate file would just clutter Downloads. The check has to look at
+  // the SAME conditions Phase 1 uses (a few lines down).
   const outData = { ...zoomScanned.data, recordings: selected };
-  await saveZoomFile(outData);
+  const _willExtractTranscripts =
+    (CACHED_SETTINGS?.extractTranscripts !== false) &&
+    selected.some(r => r.shareUrls?.length);
+  if (!_willExtractTranscripts) {
+    await saveZoomFile(outData);
+  }
   const ok = selected.filter(r => r.shareUrls?.length).length;
   if (ok === 0 && debugHtml) {
     const date = new Date().toISOString().slice(0, 10);
@@ -1171,20 +1180,84 @@ $('downloadZoom').addEventListener('click', async () => {
   } else {
     setStatus(t('status.zoom.results', { ok, total: selected.length }));
   }
-  notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
-
-  // Transcripts Phase 0 — optional network capture for development. Runs
-  // ONLY when the user explicitly ticked the checkbox in the picker; never
-  // by default. Opens each captured share URL in a background tab,
-  // monitors all fetch/XHR requests for ~15s, downloads aggregated JSON.
+  // Phase 1 — if transcripts are enabled, extract them for every
+  // recording that produced a share URL, then package everything (URL
+  // list + per-recording .vtt and .txt) into a single ZIP. The legacy
+  // text-only file output is kept for users who turned the setting off.
+  const withUrls = selected.filter(r => r.shareUrls?.length);
+  const wantTranscripts = (CACHED_SETTINGS?.extractTranscripts !== false) && withUrls.length > 0;
   const debugChk = document.getElementById('zoomDebugNetwork');
+
+  if (wantTranscripts) {
+    setStatus(`📝 מחלץ תמלילים מ-${withUrls.length} הקלטות — איטי, ~15-25 שניות לכל אחת. אל תסגור.`);
+    let transcripts = [];
+    try {
+      transcripts = await extractZoomTranscripts(
+        withUrls.map(r => ({
+          url: r.shareUrls[0],
+          topic: r.topic,
+          date: r.date,
+          meetingId: r.meetingId,
+        })),
+        (i, total, rec) => setStatus(`📝 (${i + 1}/${total}) ${rec.topic || rec.url}`),
+      );
+    } catch (e) {
+      setStatus('📝 שגיאה בחילוץ תמלילים: ' + e.message);
+      transcripts = [];
+    }
+    // Build a ZIP that contains the URL list + per-recording transcripts.
+    const files = [];
+    files.push({
+      path: 'הקלטות.txt',
+      blob: new Blob(['﻿' + buildZoomRecordingsText(outData)], { type: 'text/plain;charset=utf-8' }),
+    });
+    const summary = [];
+    summary.push('Moodle Hoarder — Zoom Transcripts');
+    summary.push('===================================');
+    summary.push(`Captured at: ${new Date().toISOString()}`);
+    summary.push(`Total recordings: ${transcripts.length}`);
+    summary.push(`With transcript: ${transcripts.filter(t => t.vtt).length}`);
+    summary.push(`Without transcript: ${transcripts.filter(t => !t.vtt).length}`);
+    summary.push('');
+    let okT = 0, failT = 0;
+    for (const t of transcripts) {
+      const dateForName = (t.recording.date || '').replace(/[^\w-]+/g, '_').slice(0, 24);
+      const baseName = sanitizeFilename(`${t.recording.topic || 'recording'}_${dateForName}`) || 'recording';
+      if (t.vtt) {
+        files.push({ path: `${baseName}.vtt`, blob: new Blob([t.vtt], { type: 'text/vtt;charset=utf-8' }) });
+        files.push({ path: `${baseName}.txt`, blob: new Blob(['﻿' + t.txt], { type: 'text/plain;charset=utf-8' }) });
+        summary.push(`✓ ${baseName}  (${t.vtt.length} bytes VTT, ${t.txt.length} bytes TXT)`);
+        okT++;
+      } else {
+        summary.push(`✗ ${baseName}  — ${t.error || 'unknown'}`);
+        failT++;
+      }
+    }
+    files.push({ path: '_status.txt', blob: new Blob(['﻿' + summary.join('\r\n')], { type: 'text/plain;charset=utf-8' }) });
+    const zipBlob = await buildZip(files);
+    const date = new Date().toISOString().slice(0, 10);
+    await chrome.downloads.download({
+      url: URL.createObjectURL(zipBlob),
+      filename: `zoom-recordings_${date}.zip`,
+      saveAs: !!CACHED_SETTINGS?.saveAs,
+    });
+    setStatus(`✅ ZIP נשמר — ${okT}/${transcripts.length} תמלילים חולצו.`);
+    notify('Moodle Hoarder', `Zoom: ${okT}/${transcripts.length} תמלילים, ${ok} URLs`);
+  } else {
+    // Legacy text-only download (also runs if all recordings failed URL
+    // extraction — saveZoomFile already happened earlier in this handler).
+    notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
+  }
+
+  // Phase 0 debug capture — still available via the picker checkbox for
+  // re-investigating future Zoom tenant changes. Runs AFTER transcripts
+  // (so the same URLs are reused).
   if (debugChk?.checked) {
-    const withUrls = selected.filter(r => r.shareUrls?.length);
     if (withUrls.length) {
       setStatus(`🔬 תלכוד network ל-${withUrls.length} הקלטות (אל תסגור)...`);
       try {
         const debugData = await captureZoomNetworkDebug(
-          withUrls.slice(0, 5).map(r => ({  // cap at 5 to keep it bearable
+          withUrls.slice(0, 5).map(r => ({
             url: r.shareUrls[0],
             topic: r.topic,
             date: r.date,
@@ -1196,9 +1269,9 @@ $('downloadZoom').addEventListener('click', async () => {
         await chrome.downloads.download({
           url: URL.createObjectURL(blob),
           filename: `zoom-network-debug_${date}.json`,
-          saveAs: true,  // user picks where — this file may contain JWTs
+          saveAs: true,
         });
-        setStatus(`🔬 זוהי קובץ debug — שלח אלי כדי שאזהה את ה-pattern של ה-VTT (יכול להכיל JWT, שתף בזהירות).`);
+        setStatus(`🔬 קובץ debug ירד.`);
       } catch (e) {
         setStatus('🔬 שגיאת תלכוד: ' + e.message);
       }
@@ -1208,15 +1281,193 @@ $('downloadZoom').addEventListener('click', async () => {
   $('backZoom').disabled = false;
 });
 
-// ========== Transcripts Phase 0 — network debug capture ==========
-// Opens each share URL in a hidden background tab, injects fetch+XHR
-// monkey-patches in MAIN world, lets them collect for ~15s, then snapshots
-// the request log. Tab is closed afterward. The aggregated output goes to
-// the user as zoom-network-debug.json so we can pattern-match VTT URLs.
+// Build the text body Zoom recording lists use — kept identical to the
+// legacy saveZoomFile output so users who turn extractTranscripts off
+// still see the familiar format.
+function buildZoomRecordingsText(data) {
+  const lines = [];
+  lines.push('Moodle Hoarder — Zoom Recordings');
+  lines.push('================================');
+  lines.push(`Source: ${data.pageUrl || '?'}`);
+  lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
+  lines.push(`Found:  ${data.recordings.length} recordings`);
+  lines.push('');
+  lines.push('=========================================================');
+  lines.push('');
+  data.recordings.forEach((r, i) => {
+    lines.push(`#${i + 1}. ${r.topic || '(no topic)'}`);
+    if (r.meetingId) lines.push(`    Meeting ID: ${r.meetingId}`);
+    if (r.date)      lines.push(`    Date:       ${r.date}`);
+    const u = (r.shareUrls && r.shareUrls[0]) || r.detailUrl || '(no URL)';
+    lines.push(`    URL:        ${u}`);
+    lines.push('');
+  });
+  lines.push('=========================================================');
+  lines.push('');
+  const ok = data.recordings.filter(r => r.shareUrls?.length).length;
+  lines.push(`נמצאו קישורים ל-${ok} מתוך ${data.recordings.length} הקלטות.`);
+  return lines.join('\r\n');
+}
+
+// ========== Transcripts Phase 1 — real VTT extraction ==========
+// Now that the debug capture confirmed the URL pattern is
+//   /rec/play/vtt?type=transcript&fid=<token>&action=play
+// served as XHR with body starting "WEBVTT", Phase 1 is straightforward:
+// open each playback page in a hidden tab, install an XHR patch that
+// watches specifically for that pattern, and snapshot the body.
 //
-// Privacy: this captures full request URLs including JWT tokens. The user
-// should treat the JSON as sensitive — Save As dialog is forced so they
-// pick where it lands.
+// Returns: array of { recording, vtt?, vttUrl?, txt?, error? }.
+
+async function extractZoomTranscripts(recordings, onProgress) {
+  const out = [];
+  for (let i = 0; i < recordings.length; i++) {
+    const rec = recordings[i];
+    onProgress?.(i, recordings.length, rec);
+    let tab = null;
+    try {
+      tab = await chrome.tabs.create({ url: rec.url, active: false });
+      // Initial settle — the page does Zoom auth + redirect first.
+      await new Promise(r => setTimeout(r, 3000));
+      // Install the VTT-watcher. It exposes window.__mhVtt = { url, body }
+      // once a VTT response lands. Runs in MAIN world so it patches the
+      // page's own XHR / fetch, not the isolated content-script ones.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => {
+          if (window.__mhVttInstalled) return;
+          window.__mhVttInstalled = true;
+          window.__mhVtt = null;
+          // URL signature confirmed via Phase 0 debug capture: Zoom serves
+          // transcripts via XHR at /rec/play/vtt?type=transcript...
+          const isVtt = (u) => /\/rec\/play\/vtt\b[^?]*\??[^#]*type=transcript/i.test(u || '');
+          const origOpen = XMLHttpRequest.prototype.open;
+          const origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (method, url) {
+            this.__mhU = url;
+            return origOpen.apply(this, arguments);
+          };
+          XMLHttpRequest.prototype.send = function () {
+            if (isVtt(this.__mhU)) {
+              this.addEventListener('load', () => {
+                try {
+                  if (this.status === 200) {
+                    const body = this.responseText || '';
+                    if (body.includes('WEBVTT')) {
+                      window.__mhVtt = { url: this.__mhU, body };
+                    }
+                  }
+                } catch {}
+              });
+            }
+            return origSend.apply(this, arguments);
+          };
+          // Belt-and-suspenders: same for fetch in case Zoom ever changes API.
+          const origFetch = window.fetch;
+          window.fetch = async function (...args) {
+            const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
+            const res = await origFetch.apply(this, args);
+            if (isVtt(url)) {
+              try {
+                const body = await res.clone().text();
+                if (body.includes('WEBVTT')) {
+                  window.__mhVtt = { url, body };
+                }
+              } catch {}
+            }
+            return res;
+          };
+        },
+      });
+      // Poll up to 25s for the transcript to arrive. The player itself
+      // needs to load → user-agent might need to click play in some
+      // tenants, but in Ariel's setup the transcript loads alongside the
+      // player automatically.
+      const deadline = Date.now() + 25000;
+      let payload = null;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 600));
+        try {
+          const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            world: 'MAIN',
+            func: () => window.__mhVtt || null,
+          });
+          if (result?.body) { payload = result; break; }
+        } catch {
+          // Tab might have been navigated; ignore and keep polling.
+        }
+      }
+      if (payload) {
+        out.push({
+          recording: rec,
+          vtt: payload.body,
+          vttUrl: payload.url,
+          txt: vttToCleanText(payload.body),
+        });
+      } else {
+        out.push({ recording: rec, error: 'No transcript captured within 25s — recording may not have one, or the player did not auto-load it.' });
+      }
+    } catch (e) {
+      out.push({ recording: rec, error: String(e) });
+    } finally {
+      if (tab?.id) {
+        try { await chrome.tabs.remove(tab.id); } catch {}
+      }
+    }
+  }
+  return out;
+}
+
+// Convert a raw WebVTT blob into clean reading text.
+//   - Strips the WEBVTT header, NOTE blocks, X-TIMESTAMP-MAP, cue numbers,
+//     and timestamps.
+//   - Groups consecutive lines from the same speaker into one paragraph.
+//   - Returns "Speaker: paragraph" separated by blank lines.
+// Zoom Hebrew/English mixed transcripts work fine — speaker names come
+// out as "Oded Medina: ...". Lines without a "Speaker: text" prefix are
+// appended to the previous paragraph.
+function vttToCleanText(vtt) {
+  if (!vtt) return '';
+  const lines = vtt.split(/\r?\n/);
+  const paragraphs = [];
+  let lastSpeaker = null;
+  let buffer = [];
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const text = buffer.join(' ').replace(/\s+/g, ' ').trim();
+    if (text) paragraphs.push(lastSpeaker ? `${lastSpeaker}: ${text}` : text);
+    buffer = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line) continue;
+    if (line === 'WEBVTT' || line.startsWith('WEBVTT')) continue;
+    if (line.startsWith('NOTE') || line.startsWith('X-TIMESTAMP-MAP') || line.startsWith('STYLE')) continue;
+    if (/^\d+$/.test(line)) continue;          // cue number
+    if (line.includes('-->')) continue;        // timestamp range
+    // Try to pull a speaker label: "Name Lastname: text" (Latin or Hebrew).
+    const m = line.match(/^([^:]{1,80}):\s*(.+)$/);
+    if (m && !/^https?$/i.test(m[1].trim())) {
+      const speaker = m[1].trim();
+      const text = m[2].trim();
+      if (speaker !== lastSpeaker) {
+        flush();
+        lastSpeaker = speaker;
+      }
+      buffer.push(text);
+    } else {
+      buffer.push(line);
+    }
+  }
+  flush();
+  return paragraphs.join('\n\n');
+}
+
+// ========== Transcripts Phase 0 (legacy debug capture) ==========
+// Kept around in case we ever need to re-investigate a new Zoom tenant.
+// Currently unused — the picker checkbox now feeds Phase 1.
 async function captureZoomNetworkDebug(recordings, onProgress) {
   const results = [];
   for (let i = 0; i < recordings.length; i++) {

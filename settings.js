@@ -78,6 +78,14 @@ const SETTINGS_DEFAULTS = {
   // integration with Notion / Anki / Sheets / scripts. Defaults to true:
   // it's small, useful, and doesn't leak anything the ZIP doesn't already.
   includeJson: true,
+
+  // Extract Zoom auto-transcripts (WebVTT) for each selected recording.
+  // When true, after the share URL extraction the extension opens each
+  // recording in a hidden background tab, intercepts the VTT XHR, and
+  // bundles transcripts (both raw .vtt and cleaned .txt) into the output
+  // ZIP. Slow: ~10-20 seconds per recording. Off requires the user to
+  // explicitly opt in — given that the time cost is significant.
+  extractTranscripts: true,
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

@@ -4,6 +4,65 @@
 
 ---
 
+## v1.19.0 — תמלילי Zoom 🎉 (Phase 1 — חילוץ אמיתי)
+
+**הקשר:** v1.18.0 הכין מצב debug. המשתמש הריץ → ה-JSON שחזר חשף את הדפוס המדויק:
+```
+GET /rec/play/vtt?type=transcript&fid=<token>&action=play
+Content-Type: txt;charset=UTF-8
+Body: WEBVTT\r\n\r\n1\r\n00:00:04.418 --> ...
+```
+VTT 90KB עם עברית מלאה, מועבר כ-XHR, מגיע אוטומטית כשהנגן נטען (בלי לחיצת play). כל מה שנשאר זה לתפוס אותו ולהמיר.
+
+**מה יש בגרסה הזו:**
+
+### `extractZoomTranscripts(recordings, onProgress)`
+
+לכל הקלטה:
+1. פותח tab רקעי עם ה-share URL.
+2. ממתין 3 שניות (Zoom עושה auth + redirect).
+3. מזריק XHR + fetch monkey-patch ב-`world: 'MAIN'` שמחפש URL שמתאים ל-`/rec/play/vtt?...type=transcript`. כשתופס, שומר ב-`window.__mhVtt = { url, body }`.
+4. polling כל 600ms עד 25 שניות. ברגע ש-`__mhVtt.body` קיים — מסיים.
+5. סוגר את ה-tab.
+
+מחזיר מערך של `{ recording, vtt?, vttUrl?, txt?, error? }`.
+
+### `vttToCleanText(vtt)`
+
+ממיר WebVTT לטקסט נקי:
+- מסיר WEBVTT header, NOTE blocks, X-TIMESTAMP-MAP, STYLE, cue numbers, timestamps.
+- מזהה "Speaker Name: text" prefix (עובד עברית + אנגלית).
+- מקבץ שורות עוקבות של אותו דובר לפסקה אחת.
+- פלט: `Speaker Name: text\n\nNextSpeaker: text\n\n...`
+
+### זרימה משולבת
+
+עד v1.18 — ה-Zoom flow הוריד txt עם URLs בלבד. עכשיו:
+- אם `extractTranscripts: true` (ברירת מחדל) **ויש לפחות URL אחד שחולץ**: בונה **ZIP** שמכיל:
+  - `הקלטות.txt` — רשימת הקישורים (תואם לפורמט הישן)
+  - לכל הקלטה עם תמליל: `<topic>_<date>.vtt` + `<topic>_<date>.txt`
+  - `_status.txt` — סיכום אילו הקלטות הצליחו/נכשלו, גדלי קבצים
+  - הורדה כ-`zoom-recordings_<תאריך>.zip`
+- אם כיבית את ההגדרה (`extractTranscripts: false`) — הזרימה הישנה בדיוק, txt בלבד.
+
+### UI
+
+- **הגדרה חדשה ב-options.html → סקציית "Zoom"**: "חילוץ תמלילים אוטומטי" (ברירת מחדל מסומן).
+- ה-checkbox של debug capture בפיקר נשאר — אבל הניסוח שונה ל-"לפיתוח בלבד" כדי לא לבלבל. עדיין שימושי אם Zoom משנה את ה-API ונצטרך לחקור מחדש.
+
+### מגבלות ידועות
+
+- **איטי:** ~15-25 שניות לכל הקלטה. סדרתי (לא במקביל). 30 הקלטות = ~10 דקות. אפשר לשפר ל-2-3 במקביל בגרסה הבאה.
+- **לא כל הקלטה יש תמליל:** מרצים שכיבו תמלול → תקבל `error` ב-`_status.txt` ולא יהיה קובץ עבור ההקלטה הזו. ה-ZIP עדיין יכלול את הקישורים והתמלילים שכן הצליחו.
+- **fid token expiry:** ה-URL של ה-VTT מכיל JWT שתוקפו ~דקות. לכן חייבים לחלץ באותו session — לא לשמור URLs לכמה שעות ולנסות אחר כך.
+- **Zoom auth:** מסתמך שאתה logged-in. אם עברו 24 שעות מ-login → fail.
+
+### תודות
+
+תודה למשתמש שהריץ את ה-debug capture של v1.18.0 ושלח את ה-JSON בזמן אמת — בלי זה הייתי צריך לנחש.
+
+---
+
 ## v1.18.0 — תמלילי Zoom (Phase 0 — network debug)
 
 **הקשר:** המשתמש ביקש פיצ'ר חדש — להוריד גם את התמלילים (transcripts) של ההרצאות מ-Zoom, נוסף ל-URLs הקיימים. אשר שיש לו אופציית "Audio Transcript" בנגן ה-Zoom של אריאל — כלומר הפיצ'ר זמין.
