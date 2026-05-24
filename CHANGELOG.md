@@ -4,6 +4,41 @@
 
 ---
 
+## v1.18.0 — תמלילי Zoom (Phase 0 — network debug)
+
+**הקשר:** המשתמש ביקש פיצ'ר חדש — להוריד גם את התמלילים (transcripts) של ההרצאות מ-Zoom, נוסף ל-URLs הקיימים. אשר שיש לו אופציית "Audio Transcript" בנגן ה-Zoom של אריאל — כלומר הפיצ'ר זמין.
+
+**איפה אנחנו בפיתוח:** לפני שאני נוגע בקוד ה-Zoom הקיים (שצוין במפורש כרגיש), אני צריך **לדעת בדיוק** איזה network request טוען את ה-VTT (WebVTT — פורמט תמלילי Zoom). הדפוס יכול להיות `/rec/transcript/...`, `/file/audio_transcript/...`, או דרך JWT query — תלוי בתצורת אריאל. במקום לנחש, מצאתי את הצורך לתלכוד תעבורת רשת אמיתית מהמשתמש.
+
+**מה יש בגרסה הזו:** מצב Debug אופציונלי בלבד. checkbox חדש בפיקר ה-Zoom — `🔬 תלכוד network`. כשהוא מסומן:
+1. הזרימה הקיימת רצה כרגיל (חילוץ URLs דרך monkey-patch על `window.open`) — **בלי שינוי**.
+2. אחרי שהיא מסתיימת, הקוד החדש לוקח עד 5 מהקלטות שהצליחו ופותח כל אחת ב-tab רקעי (`chrome.tabs.create({ active: false })`).
+3. מזריק לכל tab monkey-patch ל-`fetch` ו-`XMLHttpRequest` ב-`world: 'MAIN'` — תופס כל request עם URL, method, status, content-type, content-length, ו-snippet של עד 6KB מ-response (אם content-type/url נראים relevant: vtt/transcript/caption/subtitle/json/xml).
+4. אחרי 15 שניות, snapshot של כל ה-requests + עוד meta על הדף (final URL, title, האם יש פאנל transcript ב-DOM, snippet של body).
+5. סוגר את ה-tab.
+6. מאגד הכל ל-`zoom-network-debug.json` עם schema v1 ומחייב Save As (כי הקובץ עלול להכיל JWT).
+
+**מה הקובץ הזה ייתן לי:** הדפוס המדויק של ה-VTT request — URL pattern, headers, response shape. ברגע שאני יודע אותו, אני יכול לכתוב את ה-Phase 1: תלכוד ושמירה אוטומטית של התמליל בלי tab רקעי כל פעם.
+
+**מה לא בוצע (כי דורש את תוצאות ה-debug):**
+- חילוץ אמיתי של VTT
+- המרת VTT → TXT נקי (פירוק cues, חיתוך timestamps)
+- שמירת `transcript_<recording-id>.vtt` ו-`transcript_<recording-id>.txt` ב-ZIP
+- טוגל קבוע בהגדרות
+
+**סיכון:** הקוד החדש לחלוטין מבודד מהקוד הקיים של Zoom. רק שורה אחת בזרימה הקיימת בודקת `if (debugChk?.checked)`. אם המשתמש לא מסמן — שום דבר לא משתנה.
+
+**איך להריץ:**
+1. עבור לדף Zoom Recordings באריאל
+2. סרוק → בחר 2-3 הקלטות
+3. **סמן** את ה-checkbox `🔬 תלכוד network`
+4. לחץ "פענח קישורים והורד"
+5. הזרימה הרגילה תרוץ — tabs פתוחים, URLs נתפסים
+6. אחר כך תפתח שוב כל URL ב-tab רקעי לתלכוד (אתה תראה אותם נסגרים אחרי 15 שניות כל אחד)
+7. Save As של `zoom-network-debug_<תאריך>.json` — שלח אלי
+
+---
+
 ## v1.17.0 — הרחבת i18n + JSON export (ROADMAP #72)
 
 ### הרחבת i18n לכל המחרוזות הדינמיות

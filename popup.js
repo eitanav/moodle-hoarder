@@ -1172,8 +1172,183 @@ $('downloadZoom').addEventListener('click', async () => {
     setStatus(t('status.zoom.results', { ok, total: selected.length }));
   }
   notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
+
+  // Transcripts Phase 0 — optional network capture for development. Runs
+  // ONLY when the user explicitly ticked the checkbox in the picker; never
+  // by default. Opens each captured share URL in a background tab,
+  // monitors all fetch/XHR requests for ~15s, downloads aggregated JSON.
+  const debugChk = document.getElementById('zoomDebugNetwork');
+  if (debugChk?.checked) {
+    const withUrls = selected.filter(r => r.shareUrls?.length);
+    if (withUrls.length) {
+      setStatus(`🔬 תלכוד network ל-${withUrls.length} הקלטות (אל תסגור)...`);
+      try {
+        const debugData = await captureZoomNetworkDebug(
+          withUrls.slice(0, 5).map(r => ({  // cap at 5 to keep it bearable
+            url: r.shareUrls[0],
+            topic: r.topic,
+            date: r.date,
+          })),
+          (i, total, rec) => setStatus(`🔬 (${i + 1}/${total}) ${rec.topic || rec.url}`),
+        );
+        const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
+        const date = new Date().toISOString().slice(0, 10);
+        await chrome.downloads.download({
+          url: URL.createObjectURL(blob),
+          filename: `zoom-network-debug_${date}.json`,
+          saveAs: true,  // user picks where — this file may contain JWTs
+        });
+        setStatus(`🔬 זוהי קובץ debug — שלח אלי כדי שאזהה את ה-pattern של ה-VTT (יכול להכיל JWT, שתף בזהירות).`);
+      } catch (e) {
+        setStatus('🔬 שגיאת תלכוד: ' + e.message);
+      }
+    }
+  }
+
   $('backZoom').disabled = false;
 });
+
+// ========== Transcripts Phase 0 — network debug capture ==========
+// Opens each share URL in a hidden background tab, injects fetch+XHR
+// monkey-patches in MAIN world, lets them collect for ~15s, then snapshots
+// the request log. Tab is closed afterward. The aggregated output goes to
+// the user as zoom-network-debug.json so we can pattern-match VTT URLs.
+//
+// Privacy: this captures full request URLs including JWT tokens. The user
+// should treat the JSON as sensitive — Save As dialog is forced so they
+// pick where it lands.
+async function captureZoomNetworkDebug(recordings, onProgress) {
+  const results = [];
+  for (let i = 0; i < recordings.length; i++) {
+    const rec = recordings[i];
+    onProgress?.(i, recordings.length, rec);
+    let tab = null;
+    try {
+      tab = await chrome.tabs.create({ url: rec.url, active: false });
+      // Initial settle — Zoom playback pages are heavy SPAs, give them
+      // time before injecting so we catch the auth+player bootstrap too.
+      await new Promise(r => setTimeout(r, 3000));
+      // Install monkey-patches as early as possible (still racy: requests
+      // from the first 3s are missed). Re-running with status='complete'
+      // detection would be cleaner; keeping it simple for v0.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => {
+          if (window.__mhMonInstalled) return;
+          window.__mhMonInstalled = true;
+          window.__mhRequests = [];
+          const looksInteresting = (s) => /vtt|transcript|caption|subtitle|cc\b|webvtt|text|json|xml/i.test(s || '');
+          const origFetch = window.fetch;
+          window.fetch = async function (...args) {
+            const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
+            const method = (args[1] && args[1].method) || (args[0] && args[0].method) || 'GET';
+            const startedAt = Date.now();
+            try {
+              const res = await origFetch.apply(this, args);
+              const ct = res.headers.get('content-type') || '';
+              const cl = +(res.headers.get('content-length') || 0) || null;
+              let snippet = null;
+              if (looksInteresting(url) || looksInteresting(ct)) {
+                try { snippet = (await res.clone().text()).slice(0, 6000); } catch {}
+              }
+              window.__mhRequests.push({
+                via: 'fetch', method, url,
+                status: res.status, contentType: ct, contentLength: cl,
+                snippet, durationMs: Date.now() - startedAt,
+              });
+              return res;
+            } catch (e) {
+              window.__mhRequests.push({
+                via: 'fetch', method, url, error: String(e),
+                durationMs: Date.now() - startedAt,
+              });
+              throw e;
+            }
+          };
+          const origOpen = XMLHttpRequest.prototype.open;
+          const origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (method, url) {
+            this.__mhM = method; this.__mhU = url;
+            return origOpen.apply(this, arguments);
+          };
+          XMLHttpRequest.prototype.send = function () {
+            const startedAt = Date.now();
+            const url = this.__mhU || '';
+            this.addEventListener('loadend', () => {
+              const ct = (this.getResponseHeader && this.getResponseHeader('content-type')) || '';
+              let snippet = null;
+              try {
+                if ((looksInteresting(url) || looksInteresting(ct))
+                    && (this.responseType === '' || this.responseType === 'text')) {
+                  snippet = (this.responseText || '').slice(0, 6000);
+                }
+              } catch {}
+              window.__mhRequests.push({
+                via: 'xhr', method: this.__mhM, url,
+                status: this.status, contentType: ct,
+                contentLength: +(this.getResponseHeader && this.getResponseHeader('content-length')) || null,
+                snippet, durationMs: Date.now() - startedAt,
+              });
+            });
+            return origSend.apply(this, arguments);
+          };
+        },
+      });
+      // Let the player run and (hopefully) request the transcript.
+      await new Promise(r => setTimeout(r, 15000));
+      // Snapshot the captured requests.
+      const [{ result: reqs }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => (window.__mhRequests || []),
+      });
+      // Also grab the final DOM HTML — sometimes the transcript text is
+      // embedded directly in the page rather than fetched separately.
+      const [{ result: docInfo }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => ({
+          finalUrl: location.href,
+          title: document.title,
+          // Snippet to spot hardcoded transcript panels
+          bodySnippet: document.body.innerText.slice(0, 4000),
+          // Common transcript container selectors
+          hasTranscriptPanel: !!document.querySelector(
+            '[class*="transcript" i], [id*="transcript" i], [data-test*="transcript" i]'
+          ),
+        }),
+      });
+      results.push({
+        recording: { topic: rec.topic, date: rec.date, url: rec.url },
+        finalPageUrl: docInfo.finalUrl,
+        pageTitle: docInfo.title,
+        hasTranscriptPanel: docInfo.hasTranscriptPanel,
+        bodySnippet: docInfo.bodySnippet,
+        requestCount: reqs.length,
+        requests: reqs,
+      });
+    } catch (e) {
+      results.push({
+        recording: { topic: rec.topic, date: rec.date, url: rec.url },
+        error: String(e),
+      });
+    } finally {
+      if (tab?.id) {
+        try { await chrome.tabs.remove(tab.id); } catch {}
+      }
+    }
+  }
+  return {
+    schema: 'moodle-hoarder.zoom-debug.v1',
+    generator: 'Moodle Hoarder',
+    generatorVersion: chrome.runtime.getManifest?.()?.version || null,
+    capturedAt: new Date().toISOString(),
+    count: results.length,
+    note: 'Inspect for VTT/transcript request URL patterns. May contain JWT tokens — handle accordingly.',
+    results,
+  };
+}
 
 // ========== Download (single course) ==========
 $('download').addEventListener('click', async () => {

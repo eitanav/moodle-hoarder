@@ -437,6 +437,17 @@
     </div>
     <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
     <ul class="courses" id="zoomItems"></ul>
+    <!-- Transcripts debug capture (ROADMAP — Phase 0). When checked, after
+         URL extraction the extension opens each playback URL in a hidden
+         background tab and records all network requests (URL/method/status/
+         content-type/size). The aggregate JSON is downloaded so the user
+         can send it back for transcript-pattern analysis. -->
+    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+        <input type="checkbox" id="zoomDebugNetwork">
+        <span>🔬 תלכוד network — לפיתוח התמלילים (איטי; פותח כל URL ב-tab רקעי)</span>
+      </label>
+    </div>
     <div class="row-btns">
       <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
       <button id="downloadZoom" data-i18n="btn.decode.zoom">פענח קישורים והורד</button>
