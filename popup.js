@@ -2658,36 +2658,49 @@ function isMeydaSyllabus(url) {
 //
 // Returns an array of { path, blob } on success, or null if we couldn't
 // resolve a PDF. The caller still records the trace for the debug JSON.
+// Helper: is this URL obviously NOT the PDF we want? Cross-origin junk
+// like reCAPTCHA, Google fonts, analytics, etc. CORS will reject fetches
+// to these anyway, and we don't want to waste time trying.
+function _isMeydaCandidateJunk(u) {
+  if (!u) return true;
+  if (!/^https?:/i.test(u)) return true;
+  return /google\.com\/(recaptcha|fonts|analytics|maps)|googletagmanager|fonts\.googleapis|gstatic|googleusercontent|youtube|facebook|twitter|hotjar|clarity|segment|hubspot/i.test(u);
+}
+
 async function fetchMeydaSyllabus(item, finalUrl, trace) {
   let tab = null;
   try {
     tab = await chrome.tabs.create({ url: finalUrl, active: false });
-    // Install network monitor ASAP so we catch the first few API calls
-    // the Angular app fires on boot.
     await new Promise(r => setTimeout(r, 1500));
+    // Install a wide-net monitor: fetch + XHR + window.open + window.print.
+    // We log EVERY outgoing URL so post-processing can filter — the
+    // earlier "only file-like" filter missed cases where the response
+    // isn't a file directly but the URL leads to one after click.
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'MAIN',
       func: () => {
         if (window.__mhMeydaInstalled) return;
         window.__mhMeydaInstalled = true;
-        window.__mhMeydaCaptured = [];
-        const remember = (url, ct, size) => {
-          // Only stash entries that smell like a downloadable file.
-          if (!/pdf|octet-stream|msword|officedocument|excel|powerpoint/i.test(ct || '')
-              && !/\.(pdf|docx?|pptx?|xlsx?)\b/i.test(url || '')) return;
-          window.__mhMeydaCaptured.push({ url, contentType: ct || null, size: size || null });
+        window.__mhMeydaAll = [];     // every outgoing url
+        window.__mhMeydaPrint = false;
+        const remember = (kind, url, ct, size) => {
+          if (!url) return;
+          window.__mhMeydaAll.push({ kind, url, contentType: ct || null, size: size || null, at: Date.now() });
         };
         const origFetch = window.fetch;
         window.fetch = async function (...args) {
           const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
-          const res = await origFetch.apply(this, args);
           try {
+            const res = await origFetch.apply(this, args);
             const ct = res.headers.get('content-type') || '';
             const cl = +(res.headers.get('content-length') || 0) || null;
-            remember(url, ct, cl);
-          } catch {}
-          return res;
+            remember('fetch', url, ct, cl);
+            return res;
+          } catch (e) {
+            remember('fetch-error', url, null, null);
+            throw e;
+          }
         };
         const origOpen = XMLHttpRequest.prototype.open;
         const origSend = XMLHttpRequest.prototype.send;
@@ -2700,65 +2713,66 @@ async function fetchMeydaSyllabus(item, finalUrl, trace) {
             try {
               const ct = (this.getResponseHeader && this.getResponseHeader('content-type')) || '';
               const cl = +(this.getResponseHeader && this.getResponseHeader('content-length')) || null;
-              remember(this.__mhU, ct, cl);
+              remember('xhr', this.__mhU, ct, cl);
             } catch {}
           });
           return origSend.apply(this, arguments);
         };
+        // window.open often delivers the PDF in a new tab — capture the URL.
+        const origWindowOpen = window.open;
+        window.open = function (url, ...rest) {
+          if (url) remember('window.open', String(url), null, null);
+          return origWindowOpen.apply(this, [url, ...rest]);
+        };
+        // Some apps use window.print() instead of fetching. Flag it so
+        // the caller knows we'd need a different strategy.
+        const origPrint = window.print;
+        window.print = function () {
+          window.__mhMeydaPrint = true;
+          return origPrint.apply(this, arguments);
+        };
       },
     });
-    // Give Angular time to boot + auth + fetch metadata + load the PDF.
-    // 8s is generous — most renders complete in 3-4s but the file fetch
-    // afterwards adds another couple. If this turns out flaky, bump.
-    await new Promise(r => setTimeout(r, 8000));
-    // Snapshot the network log + DOM candidates.
-    const [{ result: snap }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: () => ({
-        networkCaptured: window.__mhMeydaCaptured || [],
-        iframe: document.querySelector('iframe[src]')?.src || null,
-        embed: document.querySelector('embed[src]')?.src || null,
-        object: document.querySelector('object[data]')?.data || null,
-        // Sometimes pdf.js renders into a canvas — the URL is on a data attr
-        pdfDataUrl: document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-pdf-url')
-                 || document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-src')
-                 || null,
-        // Anchors that look like downloads
-        anchorCandidates: [...document.querySelectorAll('a[href]')]
-          .filter(a => /\.pdf|download|הורד|הדפס|print|syllabus|file|export/i.test((a.textContent || '') + ' ' + (a.getAttribute('href') || '')))
-          .slice(0, 20)
-          .map(a => a.href),
-        // Buttons to click as a last resort (we won't click here, just report)
-        buttonCandidates: [...document.querySelectorAll('button, [role="button"]')]
-          .filter(b => /הדפס|הורד|print|download|export|save|שמור/i.test(b.textContent || ''))
-          .slice(0, 20)
-          .map(b => (b.textContent || '').trim().slice(0, 80)),
-        bodyTextLen: (document.body?.innerText || '').length,
-      }),
-    });
-    if (trace) trace.meydaSnapshot = snap;
-    // Build a prioritised candidate list. Network captures come first
-    // because they were already confirmed to look like files. Then DOM.
-    const candidates = [];
-    for (const c of (snap.networkCaptured || [])) {
-      if (c?.url) candidates.push(c.url);
+    // Phase A — let Angular boot. ~5s is enough for the SPA to render
+    // and run any initial API calls. If a PDF auto-loads (rare), we
+    // catch it without clicking.
+    await new Promise(r => setTimeout(r, 5000));
+    let snap = await _meydaSnapshot(tab.id);
+    if (trace) trace.meydaSnapshotInitial = snap;
+
+    // If nothing useful captured yet, click the "הדפס" / "Print" button.
+    // The previous debug showed this is the trigger that loads the PDF.
+    let candidates = _buildMeydaCandidates(snap, finalUrl);
+    if (candidates.length === 0) {
+      const clickRes = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => {
+          // Prefer exact-match "הדפס" / "הורד" / "Print" / "Download" buttons.
+          const matches = [...document.querySelectorAll('button, [role="button"], a')]
+            .filter(b => /^\s*(הדפס|הורד|print|download)\s*$/i.test(b.textContent || ''));
+          // Fallback: contains-match
+          const fuzzy = matches.length ? matches : [...document.querySelectorAll('button, [role="button"], a')]
+            .filter(b => /הדפס|הורד|print|download/i.test(b.textContent || ''));
+          for (const el of fuzzy) {
+            try { el.click(); return { clicked: true, text: (el.textContent || '').trim().slice(0, 80), tag: el.tagName }; } catch {}
+          }
+          return { clicked: false };
+        },
+      });
+      if (trace) trace.meydaClick = clickRes[0]?.result || null;
+      if (clickRes[0]?.result?.clicked) {
+        // Phase B — wait for the PDF to arrive after the click.
+        await new Promise(r => setTimeout(r, 6000));
+        snap = await _meydaSnapshot(tab.id);
+        if (trace) trace.meydaSnapshotAfterClick = snap;
+        candidates = _buildMeydaCandidates(snap, finalUrl);
+      }
     }
-    if (snap.iframe) candidates.push(snap.iframe);
-    if (snap.embed) candidates.push(snap.embed);
-    if (snap.object) candidates.push(snap.object);
-    if (snap.pdfDataUrl) candidates.push(snap.pdfDataUrl);
-    for (const u of (snap.anchorCandidates || [])) candidates.push(u);
-    // Dedupe while preserving order.
-    const seen = new Set();
-    const unique = candidates.filter(u => {
-      if (!u || seen.has(u)) return false;
-      seen.add(u);
-      return true;
-    });
-    if (trace) trace.meydaCandidates = unique;
-    // Try each candidate. Whichever returns a real file wins.
-    for (const cu of unique) {
+    if (trace) trace.meydaCandidates = candidates;
+    if (trace && snap?.printCalled) trace.meydaPrintCalled = true;
+    // Try each candidate. First file response wins.
+    for (const cu of candidates) {
       try {
         const absoluteUrl = new URL(cu, finalUrl).href;
         const r = await fetch(absoluteUrl, { credentials: 'include', redirect: 'follow' });
@@ -2783,6 +2797,86 @@ async function fetchMeydaSyllabus(item, finalUrl, trace) {
       try { await chrome.tabs.remove(tab.id); } catch {}
     }
   }
+}
+
+// Snapshot helper — grabs network log + DOM candidates from a meyda tab.
+async function _meydaSnapshot(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: () => ({
+      all: window.__mhMeydaAll || [],
+      printCalled: !!window.__mhMeydaPrint,
+      iframe: document.querySelector('iframe[src]')?.src || null,
+      embed: document.querySelector('embed[src]')?.src || null,
+      object: document.querySelector('object[data]')?.data || null,
+      pdfDataUrl: document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-pdf-url')
+               || document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-src')
+               || null,
+      anchorCandidates: [...document.querySelectorAll('a[href]')]
+        .filter(a => /\.pdf|download|הורד|הדפס|print|syllabus|file|export/i.test((a.textContent || '') + ' ' + (a.getAttribute('href') || '')))
+        .slice(0, 20)
+        .map(a => a.href),
+      buttonCandidates: [...document.querySelectorAll('button, [role="button"]')]
+        .filter(b => /הדפס|הורד|print|download|export|save|שמור/i.test(b.textContent || ''))
+        .slice(0, 20)
+        .map(b => (b.textContent || '').trim().slice(0, 80)),
+      bodyTextLen: (document.body?.innerText || '').length,
+    }),
+  });
+  return result || {};
+}
+
+// Builds a dedup'd, junk-filtered, prioritised candidate URL list.
+// Priority order:
+//   1. Network captures with file-y content-type or .pdf in URL
+//   2. window.open URLs (Angular often triggers PDF via window.open)
+//   3. <iframe>/<embed>/<object> URLs (PDF viewers embed here)
+//   4. data-pdf-url attributes
+//   5. anchor candidates
+function _buildMeydaCandidates(snap, baseUrl) {
+  const out = [];
+  const push = (u) => { if (u && !_isMeydaCandidateJunk(u)) out.push(u); };
+  const all = snap.all || [];
+  // Tier 1 — network entries that LOOK like files
+  for (const e of all) {
+    if (!e?.url) continue;
+    const ct = e.contentType || '';
+    if (/pdf|octet-stream|msword|officedocument|excel|powerpoint/i.test(ct)
+        || /\.(pdf|docx?|pptx?|xlsx?)\b/i.test(e.url)) {
+      push(e.url);
+    }
+  }
+  // Tier 2 — window.open calls
+  for (const e of all) {
+    if (e?.kind === 'window.open') push(e.url);
+  }
+  // Tier 3 — embedded PDF viewers
+  push(snap.iframe);
+  push(snap.embed);
+  push(snap.object);
+  push(snap.pdfDataUrl);
+  // Tier 4 — anchors
+  for (const u of (snap.anchorCandidates || [])) push(u);
+  // Tier 5 — last-resort: any meyda or ariel URL from the network log
+  // that's NOT obviously a static asset.
+  for (const e of all) {
+    if (!e?.url) continue;
+    try {
+      const parsed = new URL(e.url, baseUrl);
+      if (!/ariel\.ac\.il$/i.test(parsed.hostname)) continue;
+      if (/\.(js|css|woff|woff2|ttf|otf|svg|png|jpg|jpeg|gif|webp|ico|json)(\?|#|$)/i.test(parsed.pathname)) continue;
+      if (/loading-animation|chunk-|polyfills|main-/i.test(parsed.pathname)) continue;
+      push(e.url);
+    } catch {}
+  }
+  // Dedupe while preserving priority order.
+  const seen = new Set();
+  return out.filter(u => {
+    if (seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
 }
 
 // Heuristic: does this response look like a downloadable file rather than HTML?
