@@ -87,10 +87,13 @@ const SETTINGS_DEFAULTS = {
   extractTranscripts: true,
 
   // Which transcript file formats to include in the ZIP.
+  // 'txt'  = only the cleaned reading text (default — VTT is a subtitle
+  //          format meant for video players, not for reading; the
+  //          cleaned TXT we produce is easier to skim, search, and feed
+  //          into other tools)
   // 'both' = both .vtt (raw with timestamps) and .txt (clean reading text)
-  // 'txt'  = only the cleaned reading text
   // 'vtt'  = only the WebVTT file (subtitles for the recording)
-  transcriptFormats: 'both',
+  transcriptFormats: 'txt',
 
   // How many transcripts to extract simultaneously. Each one opens a
   // background tab that runs Zoom's player + auth, so going much higher
