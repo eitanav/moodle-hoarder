@@ -83,9 +83,19 @@ const SETTINGS_DEFAULTS = {
   // When true, after the share URL extraction the extension opens each
   // recording in a hidden background tab, intercepts the VTT XHR, and
   // bundles transcripts (both raw .vtt and cleaned .txt) into the output
-  // ZIP. Slow: ~10-20 seconds per recording. Off requires the user to
-  // explicitly opt in — given that the time cost is significant.
+  // ZIP. Parallelized 3-at-a-time (see transcriptConcurrency).
   extractTranscripts: true,
+
+  // Which transcript file formats to include in the ZIP.
+  // 'both' = both .vtt (raw with timestamps) and .txt (clean reading text)
+  // 'txt'  = only the cleaned reading text
+  // 'vtt'  = only the WebVTT file (subtitles for the recording)
+  transcriptFormats: 'both',
+
+  // How many transcripts to extract simultaneously. Each one opens a
+  // background tab that runs Zoom's player + auth, so going much higher
+  // than ~3 starts to thrash memory and risk Zoom rate-limits.
+  transcriptConcurrency: 3,
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

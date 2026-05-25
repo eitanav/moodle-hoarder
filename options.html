@@ -408,9 +408,31 @@
   <div class="row">
     <div class="label">
       <div class="name">חילוץ תמלילים אוטומטי</div>
-      <div class="hint">אחרי שמחלצים URLs של הקלטות, התוסף פותח כל אחת ב-tab רקעי, תופס את ה-VTT (תמליל אוטומטי של Zoom) ושומר ב-ZIP גם את ה-<code>.vtt</code> המקורי וגם <code>.txt</code> נקי עם דוברים ופסקאות. <strong>איטי: כ-15-25 שניות לכל הקלטה.</strong> אם כיבית — תקבל רק קישורים כמו פעם.</div>
+      <div class="hint">אחרי שמחלצים URLs של הקלטות, התוסף פותח כל אחת ב-tab רקעי ותופס את ה-VTT (התמליל האוטומטי של Zoom). אם כיבית — תקבל רק קובץ טקסט עם הקישורים, בלי ZIP. <strong>הקלטות בלי תמליל מדולגות אחרי 8 שניות</strong> (בודק שיש UI של תמליל בדף).</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="extractTranscripts"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">פורמט תמלילים</div>
+      <div class="hint">"שניהם" — גם <code>.vtt</code> מקורי (עם timestamps, יושב כסאבטייטל על וידאו) וגם <code>.txt</code> נקי לקריאה (עם דוברים ופסקאות). "רק טקסט" / "רק VTT" מקטינים את ה-ZIP.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="transcriptFormats">
+        <label><input type="radio" name="transcriptFormats" value="both">שניהם</label>
+        <label><input type="radio" name="transcriptFormats" value="txt">רק טקסט</label>
+        <label><input type="radio" name="transcriptFormats" value="vtt">רק VTT</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">מספר הקלטות במקביל</div>
+      <div class="hint">כמה תמלילים לחלץ בו-זמנית. 3 זה איזון טוב בין מהירות לעומס. גבוה יותר (4-5) ייתכן שיגרום ל-Zoom לחסום או יכבד על המחשב. תחום: 1-5.</div>
+    </div>
+    <div class="control" style="width: 100px;">
+      <input type="number" min="1" max="5" step="1" data-setting="transcriptConcurrency" placeholder="3">
+    </div>
   </div>
 </section>
 
