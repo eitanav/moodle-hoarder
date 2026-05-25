@@ -2523,6 +2523,27 @@ async function fetchUrlActivity(item) {
     return [{ kind: 'link', type: 'url', name: item.name, url: external }];
   }
 
+  // Step 3.5 — SPA detour. meyda's syllabus viewer is an Angular shell;
+  // a plain fetch returns 1.4KB of empty <app> and no anchors. We have
+  // to open it in a real tab so the JS renders the page and we can
+  // grab the actual PDF URL. Doing this BEFORE the standard external
+  // fetch saves a wasted round-trip on the empty HTML.
+  if (isMeydaSyllabus(external)) {
+    trace.stages.push({ stage: 'meyda-spa-detour', requested: external });
+    try {
+      const result = await fetchMeydaSyllabus(item, external, trace);
+      if (result) {
+        trace.finalResult = 'meyda-resolved';
+        URL_DEBUG_TRACES.push(trace);
+        return result;
+      }
+    } catch (e) {
+      trace.stages[trace.stages.length - 1].error = String(e);
+    }
+    // Fall through to the standard flow — at worst we'll still end up
+    // as a link, but we tried.
+  }
+
   // Step 4: fetch the external URL. Be aggressive — if it's a file, save it;
   // if it's an HTML page that contains a direct download link to a PDF/Office
   // file, follow that one level deeper.
@@ -2613,6 +2634,155 @@ async function fetchUrlActivity(item) {
   trace.finalResult = 'link-no-download-found';
   URL_DEBUG_TRACES.push(trace);
   return [{ kind: 'link', type: 'url', name: item.name, url: external }];
+}
+
+// Detects whether a URL points to Ariel's meyda syllabus viewer — an
+// Angular SPA at meyda.ariel.ac.il/Portals/*/show-syllabus/<id> whose
+// static HTML is empty (1.4KB shell). Only the rendered DOM has the
+// actual PDF link, so we have to load it in a real tab.
+function isMeydaSyllabus(url) {
+  try {
+    const u = new URL(url);
+    return /(^|\.)meyda\.ariel\.ac\.il$/i.test(u.hostname)
+        && /\/portals\/[^/]+\/show-syllabus\/\d+/i.test(u.pathname);
+  } catch { return false; }
+}
+
+// Opens the meyda URL in a hidden background tab, installs fetch + XHR
+// monkey-patches in MAIN world so we can see what the Angular app
+// requests, waits ~8 seconds for the SPA to fully render and load the
+// syllabus, then collects candidate PDF URLs from both the rendered DOM
+// (iframe / embed / object / anchors) and the captured network log.
+// Tries fetching each candidate with credentials; first one that comes
+// back as a real file wins.
+//
+// Returns an array of { path, blob } on success, or null if we couldn't
+// resolve a PDF. The caller still records the trace for the debug JSON.
+async function fetchMeydaSyllabus(item, finalUrl, trace) {
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: finalUrl, active: false });
+    // Install network monitor ASAP so we catch the first few API calls
+    // the Angular app fires on boot.
+    await new Promise(r => setTimeout(r, 1500));
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => {
+        if (window.__mhMeydaInstalled) return;
+        window.__mhMeydaInstalled = true;
+        window.__mhMeydaCaptured = [];
+        const remember = (url, ct, size) => {
+          // Only stash entries that smell like a downloadable file.
+          if (!/pdf|octet-stream|msword|officedocument|excel|powerpoint/i.test(ct || '')
+              && !/\.(pdf|docx?|pptx?|xlsx?)\b/i.test(url || '')) return;
+          window.__mhMeydaCaptured.push({ url, contentType: ct || null, size: size || null });
+        };
+        const origFetch = window.fetch;
+        window.fetch = async function (...args) {
+          const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
+          const res = await origFetch.apply(this, args);
+          try {
+            const ct = res.headers.get('content-type') || '';
+            const cl = +(res.headers.get('content-length') || 0) || null;
+            remember(url, ct, cl);
+          } catch {}
+          return res;
+        };
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+          this.__mhU = url;
+          return origOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+          this.addEventListener('load', () => {
+            try {
+              const ct = (this.getResponseHeader && this.getResponseHeader('content-type')) || '';
+              const cl = +(this.getResponseHeader && this.getResponseHeader('content-length')) || null;
+              remember(this.__mhU, ct, cl);
+            } catch {}
+          });
+          return origSend.apply(this, arguments);
+        };
+      },
+    });
+    // Give Angular time to boot + auth + fetch metadata + load the PDF.
+    // 8s is generous — most renders complete in 3-4s but the file fetch
+    // afterwards adds another couple. If this turns out flaky, bump.
+    await new Promise(r => setTimeout(r, 8000));
+    // Snapshot the network log + DOM candidates.
+    const [{ result: snap }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => ({
+        networkCaptured: window.__mhMeydaCaptured || [],
+        iframe: document.querySelector('iframe[src]')?.src || null,
+        embed: document.querySelector('embed[src]')?.src || null,
+        object: document.querySelector('object[data]')?.data || null,
+        // Sometimes pdf.js renders into a canvas — the URL is on a data attr
+        pdfDataUrl: document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-pdf-url')
+                 || document.querySelector('[data-pdf-url], [data-src*=".pdf" i]')?.getAttribute('data-src')
+                 || null,
+        // Anchors that look like downloads
+        anchorCandidates: [...document.querySelectorAll('a[href]')]
+          .filter(a => /\.pdf|download|הורד|הדפס|print|syllabus|file|export/i.test((a.textContent || '') + ' ' + (a.getAttribute('href') || '')))
+          .slice(0, 20)
+          .map(a => a.href),
+        // Buttons to click as a last resort (we won't click here, just report)
+        buttonCandidates: [...document.querySelectorAll('button, [role="button"]')]
+          .filter(b => /הדפס|הורד|print|download|export|save|שמור/i.test(b.textContent || ''))
+          .slice(0, 20)
+          .map(b => (b.textContent || '').trim().slice(0, 80)),
+        bodyTextLen: (document.body?.innerText || '').length,
+      }),
+    });
+    if (trace) trace.meydaSnapshot = snap;
+    // Build a prioritised candidate list. Network captures come first
+    // because they were already confirmed to look like files. Then DOM.
+    const candidates = [];
+    for (const c of (snap.networkCaptured || [])) {
+      if (c?.url) candidates.push(c.url);
+    }
+    if (snap.iframe) candidates.push(snap.iframe);
+    if (snap.embed) candidates.push(snap.embed);
+    if (snap.object) candidates.push(snap.object);
+    if (snap.pdfDataUrl) candidates.push(snap.pdfDataUrl);
+    for (const u of (snap.anchorCandidates || [])) candidates.push(u);
+    // Dedupe while preserving order.
+    const seen = new Set();
+    const unique = candidates.filter(u => {
+      if (!u || seen.has(u)) return false;
+      seen.add(u);
+      return true;
+    });
+    if (trace) trace.meydaCandidates = unique;
+    // Try each candidate. Whichever returns a real file wins.
+    for (const cu of unique) {
+      try {
+        const absoluteUrl = new URL(cu, finalUrl).href;
+        const r = await fetch(absoluteUrl, { credentials: 'include', redirect: 'follow' });
+        if (!r.ok) continue;
+        const rct = (r.headers.get('Content-Type') || '').toLowerCase();
+        const rcd = (r.headers.get('Content-Disposition') || '').toLowerCase();
+        if (isFileResponse(rct, rcd, r.url || absoluteUrl)) {
+          const blob = await r.blob();
+          const fn = filenameFromResponse(r)
+                  || (sanitizeFilename(item.name) + (extFromCT(rct) || extFromUrl(absoluteUrl) || '.pdf'));
+          if (trace) trace.meydaResolvedUrl = absoluteUrl;
+          return [{ path: fn, blob }];
+        }
+      } catch {}
+    }
+    return null;
+  } catch (e) {
+    if (trace) trace.meydaError = String(e);
+    return null;
+  } finally {
+    if (tab?.id) {
+      try { await chrome.tabs.remove(tab.id); } catch {}
+    }
+  }
 }
 
 // Heuristic: does this response look like a downloadable file rather than HTML?
