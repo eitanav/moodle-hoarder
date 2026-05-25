@@ -99,6 +99,15 @@ const SETTINGS_DEFAULTS = {
   // background tab that runs Zoom's player + auth, so going much higher
   // than ~3 starts to thrash memory and risk Zoom rate-limits.
   transcriptConcurrency: 3,
+
+  // meyda.ariel.ac.il syllabus detour (v1.22). meyda serves an Angular
+  // SPA that renders the PDF only after a click on "הדפס". Debug captures
+  // showed that meyda's server is currently inconsistent — sometimes the
+  // SPA renders the print button, sometimes it doesn't even render
+  // content. Until that stabilises, the detour is OFF by default to
+  // avoid wasting ~11 seconds per syllabus on a fetch that won't succeed.
+  // Flip to true to re-enable.
+  tryMeydaSyllabusDetour: false,
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

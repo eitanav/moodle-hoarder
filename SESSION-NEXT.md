@@ -1,70 +1,77 @@
 # הנדאוף — לסשן הבא
 
-## מצב אחרון (v1.20.1)
+## מצב אחרון (v1.22.2)
 
-- ✅ תמלילי Zoom עובדים מצוין — chain מלא: extract URL → open bg tab → catch VTT XHR → vttToCleanText → ZIP
-- ✅ Parallel (3 במקביל), early-skip (8s), טוגלי פורמט, שמות חכמים
-- ✅ ברירת מחדל הוחלפה ל-`transcriptFormats: 'txt'` (משתמש ביקש)
+- ✅ תמלילי Zoom — Phase 2 עובד מצוין (parallel, early-skip, formats, smart naming, timestamped TXT)
+- ✅ VTT → TXT converter standalone (כפתור בפופאפ)
+- ✅ URL debug sidecar (`_url-debug.json` נוצר אוטומטית כשפריט url לא יורד)
+- ⏸️ **סילבוס meyda — מושהה.** ראה למטה.
 
-## משימה #1 — סילבוס (קריטי)
+## הסילבוס: מה הולך עם meyda
 
-### הבעיה כפי שדווחה ע"י המשתמש
+### הבעיה
 
-"אני לא מצליח להבין איך להוריד את זה בצורה פשוטה, וסילבוס זה חומר קריטי."
+ה-URL של סילבוס הוא `https://meyda.ariel.ac.il/Portals/ex/show-syllabus/<id>`. החל מ-v1.22.0 ניסיתי להתמודד עם זה דרך bg tab + DOM scrape + click automation. שלושה debug captures מהמשתמש חשפו:
 
-זה אומר: גם עם 4-layer fallback ש-v1.9.0 הוסיף, הסילבוס לא ירד באופן ידידותי, או נופל לחלוטין.
+1. **HTML סטטי ריק** (1397 בתים, רק `<app></app>` + Angular bundles)
+2. **Angular SPA לפעמים מרנדר ולפעמים לא** — בריצה אחת `bodyTextLen: 356` ויש כפתור "הדפס", בריצה אחרת `bodyTextLen: 16` ואין כלום
+3. **meyda עצמו שבור גם ידנית** — המשתמש דיווח שגם בדפדפן רגיל, כשלוחצים "הדפס" באתר meyda, מקבלים "הורדה נכשלה"
 
-### מה צריך לחקור בסשן הבא
+### למה זה לא קוד שלי
 
-הקוד הקיים של סילבוס נמצא ב-`fetchUrl` / `fetchResource` ב-popup.js, עם השכבות:
-1. ניסיון `mod/url/view.php?redirect=1` → אם קובץ ישיר, מוריד
-2. אם HTML — לחפש `urlworkaround` / `<meta refresh>` / `window.location`
-3. fetch של ה-URL החיצוני
-4. אם זה HTML — חיפוש קישור download בתוכו ומעקב שלב נוסף
+הקוד עובד נכון: פותח tab, מזריק monitor, מחכה, scrape, מנסה fetch. כל השלבים מתועדים ב-trace. אבל אם meyda לא מגיש את ה-API call לסילבוס — אי אפשר לחלץ דבר שלא נשלח.
 
-צריך **לראות את ה-DOM האמיתי של עמוד סילבוס באריאל** כדי לדעת איפה זה נופל. אופציות לפתרון:
+ב-debug 3 (v1.22.1) ראינו:
+```json
+"all": [
+  "ClientApp/StaticFiles/Languages/he.*.json",   // bundle של תרגומים
+  "https://www.google-analytics.com/g/collect...." // tracking
+],
+"bodyTextLen": 16,
+"buttonCandidates": []
+```
 
-#### גישה א — Debug capture כמו עם ה-Zoom
-מצב debug אופציונלי שכש-fetchUrl נכשל על סילבוס, יציל את ה-HTML של כל שלב לקובץ `syllabus-debug-<id>.html`, ו-aggregates ל-JSON של chain. דומה ל-v1.18.0 ל-Zoom.
+האנגולר טען, ביקש תרגומים, דיווח לאנליטיקה — ועצר. אין שום בקשת API לסילבוס.
 
-#### גישה ב — לבקש מהמשתמש לפתוח סילבוס ידנית בטאב חדש ולשלוח HTML
-פחות עבודה לי, יותר עבודה לו. אבל הכי ישיר.
+### מה עשיתי ב-v1.22.2
 
-#### גישה ג — להוסיף "Open & download manually" כפתור צמוד לסילבוס בפיקר
-אם לא מצליחים לחלץ אוטומטית, פותחים את ה-link בטאב חדש; המשתמש כבר יראה את ה-PDF ויוריד מ-Chrome. פתרון UX, לא טכני.
+- ה-detour כבוי בברירת המחדל: `tryMeydaSyllabusDetour: false`
+- הקוד נשאר במקום (`fetchMeydaSyllabus`, `_meydaSnapshot`, `_buildMeydaCandidates`, `_isMeydaCandidateJunk`, `isMeydaSyllabus`) — מוכן להפעלה מחדש
+- סילבוס חוזר להיות link ב-`links.txt` כמו פעם
+- אין יותר 11 שניות המתנה לכל סילבוס
 
-### מה אני צריך מהמשתמש בתחילת הסשן הבא
+### מתי להפעיל מחדש
 
-**מאוד חשוב:** לקבל ממנו אחד מהשניים:
+המשתמש מציע לבדוק:
 
-1. **קישור לקורס מודל אריאל שבו הסילבוס בעייתי** + שיריץ "סרוק" ויראה אם הסילבוס מופיע ברשימת הפריטים, ואם כן — אילו שגיאות יש ב-log אחרי הניסיון להוריד
-2. **דמפ של ה-HTML של עמוד הסילבוס** (View Source או DevTools → Sources → Page) — אז אני יכול לזהות את הדפוס בלי גישה אישית
+1. **אם meyda חזר לעבוד ידנית** — הכנס ל-URL של סילבוס בדפדפן רגיל, חכה שייטען, לחץ "הדפס". אם ירד PDF → meyda חזר.
+2. **אם אריאל הודיעו על תקלה** — לחפש email/SMS מ-IT של אריאל על תקלה בפורטל meyda.
+3. **אם נסיון על קורס אחר עובד** — אולי הבעיה ספציפית לקורס "חיישנים" (syllabus id 247298) ולא לכל ה-meyda.
 
-### תוכנית עבודה משוערת
+כש-meyda חוזר לעבוד — אפשר ל-`getSettings` ב-DevTools של options page ולעדכן `tryMeydaSyllabusDetour: true`, או לבנות לזה toggle ב-UI (5 דקות עבודה).
 
-1. הבנה מהמשתמש איפה הסילבוס נופל (5 דקות)
-2. עיון בקוד fetchUrl + הוספת לוגים זמניים (10 דקות)
-3. תיקון לפי הממצא — סביר שעוד שכבת fallback או handling של redirect חדש (30 דקות)
-4. v1.21.0 עם תיקון סילבוס + בדיקה אמיתית מול הקורס של המשתמש
+### אם meyda נשאר שבור לתמיד
 
-## משימה #2 — עוד פיצ'רים פתוחים (לא בוערים)
+יש מסלולים חלופיים — אבל כל אחד כרוך בלא-מעט עבודה:
 
-- **#80 service worker downloads** — תוכנן ב-MIGRATION-80.md, L בגודל
-- **#21 PDF renaming by title** — L, צריך pdf.js
-- **#28 quiz attempts archive**
-- **#82 pause/resume**
+1. **Bypass meyda לגמרי** — לבדוק אם יש endpoint רגיל באריאל שמספק סילבוסים. למשל `moodlearn.ariel.ac.il/local/syllabus/...` או דרך ה-API של Moodle. דורש מחקר על המבנה הפנימי של אריאל.
+2. **Print → blob via window.print monkey-patch** — לתפוס את ה-iframe ש-Chrome מייצר לפני שהוא נשלח להדפסה. הזיהוי קיים (`meydaPrintCalled`), אבל לתפוס את התוכן עצמו דורש עבודה ניכרת.
+3. **Drop כל מה שמ-meyda וביקש מהמשתמש לפתוח ידנית** — הסילבוס יהיה link בלבד, המשתמש פותח בדפדפן בעצמו. זה ההתנהגות הנוכחית עכשיו.
 
-## משימה #3 — שיפורי תמלילים אפשריים (לעתיד)
+## משימות שמחכות
 
-- **timestamp-aware TXT** — אופציה שלישית לפורמט שמשמרת timestamps בפורמט קריא: `[10:23] Speaker: text`. שימושי לציטוט.
-- **תמלילים לתוך הורדת קורס** — היום זה רק בזרימת Zoom-LTI. כדאי שאם המשתמש מוריד קורס מלא + יש לו לינקים ל-Zoom בקורס, התמלילים יורדו אתם.
-- **VTT converter standalone** — קלט: VTT שהמשתמש משיג ממקור אחר. פלט: TXT. כפתור "המר VTT" בפופאפ.
+ראה גם CHANGELOG.md לפרטים מלאים.
 
-## ל-Claude הבא
+- **#80 service worker downloads** — ראה MIGRATION-80.md. L בגודל. ה-checkpoint הקיים מטפל ב-80% מהבעיה.
+- **#21 PDF renaming by title** — L, צריך pdf.js. נדחה.
+- **שיפור תמלילים אפשרי** — חילוץ תמלילים גם כשמורידים קורס שלם, לא רק מתוך זרימת Zoom-LTI.
 
-- אל תיגע בקוד Zoom ה-resolver (`resolveZoomPlayUrls`, `waitForDetailPage`, `clickPlayAndCaptureUrl`) — שביר ועדין
-- **כן** אפשר לגעת ב-`extractZoomTranscripts` / `extractOneTranscript` — זה קוד חדש שכתבתי, פחות רגיש
-- כל פיצ'ר חדש עם on/off → ב-options.html, לא בפופאפ (כלל זהב)
+## כללי זהב לסשן הבא
+
+- אל תיגע בקוד Zoom ה-resolver — שביר ועדין
+- כן אפשר לגעת ב-`extractZoomTranscripts` / `fetchMeydaSyllabus` — קוד חדש שלי
+- כל פיצ'ר חדש עם on/off → ב-options.html, לא בפופאפ
 - CHANGELOG.md לכל גרסה, עם "הבעיה לפני / הפתרון / איך לבחון"
 - שמירת bidirectional marks בעברית: `replace(/[‎‏‪-‮⁦-⁩﻿]/g, '')` לפני regex match
 - Windows filename sanitisation: `sanitizeFilename()` תמיד
+- **כשהשרת שבור — לא הקוד שבור.** אל תנסה לפצח שרת שלא מחזיר דאטה.
