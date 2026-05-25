@@ -2523,12 +2523,17 @@ async function fetchUrlActivity(item) {
     return [{ kind: 'link', type: 'url', name: item.name, url: external }];
   }
 
-  // Step 3.5 — SPA detour. meyda's syllabus viewer is an Angular shell;
-  // a plain fetch returns 1.4KB of empty <app> and no anchors. We have
-  // to open it in a real tab so the JS renders the page and we can
-  // grab the actual PDF URL. Doing this BEFORE the standard external
-  // fetch saves a wasted round-trip on the empty HTML.
-  if (isMeydaSyllabus(external)) {
+  // Step 3.5 — SPA detour for meyda's syllabus viewer.
+  // PAUSED IN v1.22.2: meyda's server has been inconsistent — the
+  // Angular SPA sometimes renders content and a "הדפס" button, other
+  // times it doesn't render anything at all (bodyTextLen<20, zero API
+  // calls, zero buttons). User confirmed even manual access to meyda
+  // currently fails to deliver the syllabus. Running the detour
+  // unconditionally just burns ~11 seconds per syllabus for no gain.
+  // Gated behind the `tryMeydaSyllabusDetour` setting (default false)
+  // so the code is preserved and a curious user can re-enable when
+  // meyda comes back online.
+  if (CACHED_SETTINGS?.tryMeydaSyllabusDetour && isMeydaSyllabus(external)) {
     trace.stages.push({ stage: 'meyda-spa-detour', requested: external });
     try {
       const result = await fetchMeydaSyllabus(item, external, trace);
