@@ -131,15 +131,28 @@ document.addEventListener('keydown', (e) => {
 // /my/ — the user doesn't need to press "סרוק" there; opening the popup
 // is already an explicit intent.
 (async () => {
-  await loadCachedSettings();
-  await refreshQueueArea();
+  // Defensive: a throw here (e.g. settings.js / i18n.js bug) was previously
+  // silently swallowed — the popup looked fine but every button click
+  // ended in confusion. Log loudly so we can see it in DevTools.
+  try {
+    await loadCachedSettings();
+  } catch (e) {
+    console.error('[Moodle Hoarder] loadCachedSettings failed:', e);
+  }
+  try {
+    await refreshQueueArea();
+  } catch (e) {
+    console.error('[Moodle Hoarder] refreshQueueArea failed:', e);
+  }
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url && /moodlearn\.ariel\.ac\.il\/my\/?(?:[?#]|$|index\.php)/.test(tab.url)) {
       await runDashboardScan(tab);
     }
-  } catch {}
+  } catch (e) {
+    console.error('[Moodle Hoarder] auto-dashboard-scan failed:', e);
+  }
 })();
 
 // Dashboard scan: shared between auto-bootstrap and the manual scan button
@@ -382,7 +395,11 @@ $('scan').addEventListener('click', async () => {
       $('scan').disabled = false;
     }
   } catch (e) {
-    setStatus(t('status.error.with.message', { msg: e.message }));
+    // Surface the full error in DevTools so we can diagnose scan
+    // breakage — the i18n'd status only shows e.message which often
+    // hides the actual stack.
+    console.error('[Moodle Hoarder] Scan failed:', e);
+    setStatus(t('status.error.with.message', { msg: e.message || String(e) }));
     $('scan').disabled = false;
   } finally {
     setSkeleton(false);
@@ -1562,50 +1579,52 @@ function zoomZipFilename(recordings, isoDate) {
   return `zoom-recordings_${isoDate}.zip`;
 }
 
-// Convert a raw WebVTT blob into clean reading text.
-//   - Strips the WEBVTT header, NOTE blocks, X-TIMESTAMP-MAP, cue numbers,
-//     and timestamps.
-//   - Groups consecutive lines from the same speaker into one paragraph.
-//   - Returns "Speaker: paragraph" separated by blank lines.
-// Zoom Hebrew/English mixed transcripts work fine — speaker names come
-// out as "Oded Medina: ...". Lines without a "Speaker: text" prefix are
-// appended to the previous paragraph.
+// Convert a raw WebVTT blob into readable timestamped text.
+//   - Strips the WEBVTT header, NOTE blocks, X-TIMESTAMP-MAP, cue numbers.
+//   - Replaces "HH:MM:SS.fff --> HH:MM:SS.fff" with a leading "[HH:MM:SS] ".
+//   - One cue per line (no paragraph grouping by speaker — timestamps
+//     already provide natural separation, and grouping was hiding when a
+//     speaker said something brief then resumed).
+//   - Keeps the "Speaker: text" label as it appears in the VTT.
+// User request: "convert VTT to text including timestamps, no need for
+// a separate VTT file in the ZIP, this is enough".
 function vttToCleanText(vtt) {
   if (!vtt) return '';
   const lines = vtt.split(/\r?\n/);
-  const paragraphs = [];
-  let lastSpeaker = null;
+  const out = [];
+  let currentStart = null;
   let buffer = [];
-  const flush = () => {
-    if (buffer.length === 0) return;
+  const flushCue = () => {
+    if (!buffer.length) return;
     const text = buffer.join(' ').replace(/\s+/g, ' ').trim();
-    if (text) paragraphs.push(lastSpeaker ? `${lastSpeaker}: ${text}` : text);
+    if (text) out.push(currentStart ? `[${currentStart}] ${text}` : text);
     buffer = [];
   };
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const line = raw.trim();
-    if (!line) continue;
+    const line = lines[i].trim();
     if (line === 'WEBVTT' || line.startsWith('WEBVTT')) continue;
     if (line.startsWith('NOTE') || line.startsWith('X-TIMESTAMP-MAP') || line.startsWith('STYLE')) continue;
     if (/^\d+$/.test(line)) continue;          // cue number
-    if (line.includes('-->')) continue;        // timestamp range
-    // Try to pull a speaker label: "Name Lastname: text" (Latin or Hebrew).
-    const m = line.match(/^([^:]{1,80}):\s*(.+)$/);
-    if (m && !/^https?$/i.test(m[1].trim())) {
-      const speaker = m[1].trim();
-      const text = m[2].trim();
-      if (speaker !== lastSpeaker) {
-        flush();
-        lastSpeaker = speaker;
-      }
-      buffer.push(text);
-    } else {
-      buffer.push(line);
+    // Timestamp line — "00:00:04.418 --> 00:00:18.504" (sometimes with
+    // alignment / position metadata after). We start a new cue here.
+    const tsMatch = line.match(/^(\d{1,2}:\d{2}:\d{2})[.,]\d+\s*-->\s*\d/);
+    if (tsMatch) {
+      flushCue();
+      currentStart = tsMatch[1];
+      continue;
     }
+    // Some VTTs use M:SS without an hours component
+    const tsMatch2 = line.match(/^(\d{1,2}:\d{2})[.,]\d+\s*-->\s*\d/);
+    if (tsMatch2) {
+      flushCue();
+      currentStart = tsMatch2[1];
+      continue;
+    }
+    if (!line) { flushCue(); continue; }
+    buffer.push(line);
   }
-  flush();
-  return paragraphs.join('\n\n');
+  flushCue();
+  return out.join('\n');
 }
 
 // ========== Transcripts Phase 0 (legacy debug capture) ==========
