@@ -4,6 +4,51 @@
 
 ---
 
+## v1.22.1 — meyda: לחיצה אוטומטית על "הדפס" + סינון junk
+
+**הבעיה ב-v1.22.0:** ה-snapshot החדש חשף שתיים:
+1. `networkCaptured: []` ו-`anchorCandidates: []` — meyda לא טוען את ה-PDF אוטומטית כשנכנסים ל-URL. דרושה לחיצה על כפתור.
+2. ה-iframe היחיד היה `https://www.google.com/recaptcha/api2/anchor?...` — והקוד שלי ניסה fetch אליו, חטף CORS error מגוגל.
+3. אבל היה גם: `buttonCandidates: ["הדפס"]` — הכפתור שצריך ללחוץ.
+
+**הפתרון:**
+
+### 1. לחיצה אוטומטית
+
+ב-`fetchMeydaSyllabus` יש עכשיו שני שלבים:
+- **Phase A:** המתנה של 5 שניות, snapshot. אם יש candidates → ננסה אותם.
+- **Phase B (חדש):** אם Phase A החזיר 0 candidates, מחפש כפתור עם `^(הדפס|הורד|print|download)$` (exact match) או fallback ל-contains. לוחץ עליו דרך `el.click()`. ממתין 6 שניות נוספות. snapshot חדש.
+
+### 2. Monkey-patch מורחב
+
+- **`window.open`** — כש-Angular פותח PDF בטאב חדש, ה-URL נתפס לפני שהטאב נפתח.
+- **`window.print`** — אם meyda משתמש ב-`window.print()` במקום fetch, נדע שצריך אסטרטגיה אחרת. נסמן ב-`meydaPrintCalled: true` ב-trace.
+- **כל ה-fetch + XHR** — בלי הסינון המוקדם של "file-like". כל URL נשמר, סינון בפוסט-פרוסס.
+
+### 3. סינון junk
+
+`_isMeydaCandidateJunk` דוחה: reCAPTCHA, Google fonts/analytics/maps, YouTube, Facebook, hotjar, וכו'. אם ה-URL לא http/https — דחוי. **לא** ננסה fetch לדומיינים האלה — חוסך CORS errors.
+
+### 4. עדיפויות candidates
+
+`_buildMeydaCandidates` בונה רשימה ממוינת:
+1. Network entries עם content-type קובץ
+2. `window.open` URLs
+3. iframe/embed/object/pdfDataUrl
+4. Anchor candidates
+5. Last-resort: כל URL מ-meyda/ariel שלא נראה כמו static asset
+
+הראשון שמחזיר file response בעת fetch — מנצח.
+
+**מה לבדוק:** הריץ שוב את אותו הקורס (חיישנים). אמור לראות hash של trace חדש ב-`_url-debug.json`:
+- `meydaSnapshotInitial` — לפני הלחיצה
+- `meydaClick: { clicked: true, text: "הדפס" }` — אם נלחץ בהצלחה
+- `meydaSnapshotAfterClick` — אחרי הלחיצה (אמור להכיל את ה-PDF ב-`all`)
+- `meydaPrintCalled: true` — אם meyda השתמש ב-window.print (כש זה קורה, נדע שצריך אסטרטגיה אחרת)
+- `meydaResolvedUrl` — אם הצלחנו לחלץ את ה-PDF, ה-URL ממנו הורדתי
+
+---
+
 ## v1.22.0 — תיקון סילבוס meyda (Angular SPA detour)
 
 **הקשר:** v1.21.1 הוסיף debug trace. המשתמש הריץ והעביר את הקובץ — הוא חשף שמייה הוא **Angular SPA**: HTML של 1397 בתים בלבד עם `<app></app>` ריק ושתי tags של `<script type="module">`. ה-PDF נטען רק אחרי שה-JS רץ ובונה את העמוד דינמית. `candidates: []` היה ריק כי הסלקטורים שלי רצו על ה-static HTML שאין בו כלום.
