@@ -369,6 +369,16 @@
       </button>
       <a id="clearQueue" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
     </div>
+    <!-- Standalone VTT→TXT converter. Takes any .vtt the user has — from
+         a previous run, downloaded directly from Zoom, or anywhere — and
+         spits out the cleaned TXT. Reuses vttToCleanText. -->
+    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);">
+      <label for="vttFile" id="vttConvertBtn" style="display:block; padding: 8px 12px; background: var(--row); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center;">
+        🔄 המר קובץ VTT לטקסט נקי
+      </label>
+      <input id="vttFile" type="file" accept=".vtt,text/vtt,text/plain" multiple style="display:none;">
+      <div class="hint" style="margin-top: 6px;">בחר קובץ <code>.vtt</code> מהמחשב (אפשר גם כמה ביחד). יורד <code>.txt</code> עם דוברים ופסקאות.</div>
+    </div>
   </div>
 
   <div id="picker" style="display:none;">

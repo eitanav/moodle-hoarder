@@ -284,6 +284,47 @@ document.getElementById('downloadQueue')?.addEventListener('click', async () => 
   document.getElementById('downloadQueue').disabled = false;
 });
 
+// ---------- Standalone VTT→TXT converter ----------
+// Lets the user drop one or more .vtt files in and get cleaned .txt
+// downloads. Reuses vttToCleanText so the formatting matches what we
+// produce inside the Zoom flow. Useful for VTTs from other sources
+// (downloaded straight from Zoom, archived from earlier runs, etc.).
+document.getElementById('vttFile')?.addEventListener('change', async (e) => {
+  const files = [...(e.target.files || [])];
+  if (!files.length) return;
+  const btn = document.getElementById('vttConvertBtn');
+  const originalLabel = btn?.textContent;
+  let done = 0;
+  for (const file of files) {
+    if (btn) btn.textContent = `🔄 ממיר (${done + 1}/${files.length}) ${file.name}…`;
+    try {
+      const vtt = await file.text();
+      if (!vtt.includes('WEBVTT')) {
+        logLine(`✗ ${file.name}: לא נראה כמו קובץ VTT (אין WEBVTT header)`, 'err');
+        continue;
+      }
+      const txt = vttToCleanText(vtt);
+      // Strip the .vtt extension if present, then add .txt
+      const stem = file.name.replace(/\.vtt$/i, '');
+      const outName = `${sanitizeFilename(stem) || 'transcript'}.txt`;
+      const blob = new Blob(['﻿' + txt], { type: 'text/plain;charset=utf-8' });
+      await chrome.downloads.download({
+        url: URL.createObjectURL(blob),
+        filename: outName,
+        saveAs: false,
+      });
+      logLine(`✓ ${outName} (${(txt.length / 1024).toFixed(1)}KB)`, 'ok');
+    } catch (err) {
+      logLine(`✗ ${file.name}: ${err.message}`, 'err');
+    }
+    done++;
+  }
+  if (btn) btn.textContent = originalLabel || '🔄 המר קובץ VTT לטקסט נקי';
+  // Reset the input so the same file can be reselected after a fix.
+  e.target.value = '';
+  setStatus(`✅ ${done} קבצים הומרו.`);
+});
+
 // ---------- Initial: scan button ----------
 function setSkeleton(show) {
   const el = document.getElementById('skeleton');
