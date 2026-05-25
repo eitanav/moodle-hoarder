@@ -4,6 +4,37 @@
 
 ---
 
+## v1.22.0 — תיקון סילבוס meyda (Angular SPA detour)
+
+**הקשר:** v1.21.1 הוסיף debug trace. המשתמש הריץ והעביר את הקובץ — הוא חשף שמייה הוא **Angular SPA**: HTML של 1397 בתים בלבד עם `<app></app>` ריק ושתי tags של `<script type="module">`. ה-PDF נטען רק אחרי שה-JS רץ ובונה את העמוד דינמית. `candidates: []` היה ריק כי הסלקטורים שלי רצו על ה-static HTML שאין בו כלום.
+
+**הפתרון:** Detour של "Step 3.5" ב-`fetchUrlActivity`. כש-`external URL` תואם תבנית meyda syllabus (`meyda.ariel.ac.il/Portals/*/show-syllabus/<id>`):
+
+1. **פותח tab רקעי** עם ה-URL — Chrome יריץ את ה-Angular SPA כרגיל.
+2. **מזריק network monitor** ב-`world: 'MAIN'` שעוקב אחרי **fetch + XHR**. כל request עם content-type של `pdf` / `octet-stream` / Office / או URL שמכיל `.pdf` נשמר ב-`window.__mhMeydaCaptured`.
+3. **ממתין 8 שניות** — מספיק זמן ל-Angular לבוט + auth + לטעון את ה-PDF.
+4. **תופס snapshot** של:
+   - רשימת ה-requests שתועדה (`networkCaptured`)
+   - `<iframe src>`, `<embed src>`, `<object data>` ב-DOM
+   - data-attributes שמרמזות PDF (`data-pdf-url`, `data-src`)
+   - anchors שמכילים `download`/`pdf`/`syllabus`/`הורד`/`הדפס` (עד 20)
+   - לוג של כפתורים רלוונטיים (לחיזוי עתידי — לא נלחצים עדיין)
+5. **בונה רשימת candidates** ממוינת לפי עדיפות (network קודם — כבר אומת שזה קובץ, ואז DOM).
+6. **מנסה fetch לכל candidate** עם credentials. הראשון שמחזיר file response → נשמר ל-ZIP.
+7. **סוגר את ה-tab.**
+
+אם meyda עדיין נכשל, הזרימה נופלת בחזרה ללוגיקה הסטנדרטית (הניחוש ב-static HTML — שתמיד יחזור ריק עבור meyda, אבל לפחות לא חוסם).
+
+**יתרון נוסף:** ה-`meydaSnapshot` נשמר ב-`_url-debug.json` גם כשהפעולה הצליחה — אם בעתיד meyda ישתנה, יהיה לנו snapshot להסתכל עליו.
+
+**איך לבחון:**
+1. סרוק קורס עם סילבוס meyda (חיישנים — אותו אחד מה-debug)
+2. לחץ "הורד" — תראה ב-status שורה שאומרת שזה רץ ב-bg tab (יקח ~10 שניות נוספות לסילבוס)
+3. ב-ZIP אמור להופיע `סילבוס.pdf` (או שם אחר אם meyda נותן אחר ב-Content-Disposition)
+4. אם עדיין יורד כ-link → פתח את `_url-debug.json`, חפש `meydaSnapshot`, ושלח אלי. אז אחזה מה לא תפסתי.
+
+---
+
 ## v1.21.2 — tx-stamped תמלילים + לוגים לאבחון scan
 
 **שני שינויים:**
