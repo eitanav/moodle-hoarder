@@ -1937,6 +1937,9 @@ function blobFromBase64(b64, mime = 'application/octet-stream') {
 async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   if (!silent) logEl.innerHTML = '';
   setProgress(0, items.length);
+  // Reset URL-activity debug bucket for this run. Anything fetchUrlActivity
+  // can't resolve to a file gets pushed here and ends up in _url-debug.json.
+  URL_DEBUG_TRACES = [];
 
   const files = [];
   const links = [];      // generic URL activities
@@ -2015,6 +2018,29 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
   }
   const info = buildInfo({ courseName, courseUrl, items, files, links, recordings, events, errors });
   files.push({ path: 'info.txt', blob: textBlob(info) });
+
+  // URL-activity debug sidecar. Only included when at least one URL item
+  // failed to resolve to a downloadable file. Lets the user (and future
+  // me) inspect exactly what the page returned and which selectors didn't
+  // match. Captures HTML snippets capped at 80KB per stage.
+  if (URL_DEBUG_TRACES.length > 0) {
+    const debugPayload = {
+      schema: 'moodle-hoarder.url-debug.v1',
+      generator: 'Moodle Hoarder',
+      generatorVersion: chrome.runtime.getManifest?.()?.version || null,
+      courseName,
+      courseId: courseId || null,
+      courseUrl,
+      capturedAt: new Date().toISOString(),
+      failedUrlCount: URL_DEBUG_TRACES.length,
+      note: 'URL activities that ended as links rather than files. Inspect each entry`s stages to see what the page returned. May contain HTML with personal info — review before sharing.',
+      traces: URL_DEBUG_TRACES,
+    };
+    files.push({
+      path: '_url-debug.json',
+      blob: new Blob([JSON.stringify(debugPayload, null, 2)], { type: 'application/json' }),
+    });
+  }
 
   // Structured machine-readable dump of the course (ROADMAP #72).
   // Doesn't include the file blobs themselves — just metadata — so it's
@@ -2377,18 +2403,52 @@ function extractAssignDue(doc) {
   return null;
 }
 
+// Per-download bucket for URL-activity debug traces. Reset by runDownload
+// at the start of each course. Captures the full chain for every URL
+// item that ended up as a "link" (i.e. we couldn't grab the file). The
+// info gets serialised into _url-debug.json inside the ZIP if there are
+// any failures, so the user can inspect / share it.
+let URL_DEBUG_TRACES = [];
+
+function _headersToObj(h) {
+  const o = {};
+  try { h.forEach((v, k) => { o[k] = v; }); } catch {}
+  return o;
+}
+function _capHtml(s, limit = 80000) {
+  if (!s) return s;
+  return s.length > limit ? s.slice(0, limit) + `\n... [truncated, total ${s.length} chars]` : s;
+}
+
 async function fetchUrlActivity(item) {
   // Step 1: hit mod/url/view.php with redirect=1 so Moodle follows its own
   // workaround and either delivers the file content directly or 302s us to
   // the external URL. We follow all redirects automatically.
   const moodleUrl = item.url + (item.url.includes('?') ? '&' : '?') + 'redirect=1';
+  const trace = {
+    item: { id: item.id, name: item.name, url: item.url, sectionIdx: item.sectionIdx },
+    stages: [],
+    finalResult: null,
+  };
   let res, finalUrl, ct, cd;
   try {
     res = await fetch(moodleUrl, { credentials: 'include', redirect: 'follow' });
     finalUrl = res.url || item.url;
     ct = (res.headers.get('Content-Type') || '').toLowerCase();
     cd = (res.headers.get('Content-Disposition') || '').toLowerCase();
-  } catch {
+    trace.stages.push({
+      stage: 'moodle-url',
+      requested: moodleUrl,
+      finalUrl,
+      status: res.status,
+      contentType: ct,
+      contentDisposition: cd,
+      headers: _headersToObj(res.headers),
+    });
+  } catch (e) {
+    trace.stages.push({ stage: 'moodle-url', requested: moodleUrl, error: String(e) });
+    trace.finalResult = 'link-on-fetch-error';
+    URL_DEBUG_TRACES.push(trace);
     return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
   }
 
@@ -2406,41 +2466,63 @@ async function fetchUrlActivity(item) {
   // actual external page.
   let html = '';
   try { html = await res.text(); } catch {}
+  trace.stages[0].htmlSnippet = _capHtml(html);
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
   // Step 2: extract the external URL
   let external = doc.querySelector('a.urlworkaround')?.href
               || doc.querySelector('.urlworkaround a')?.href
               || doc.querySelector('main a[href^="http"]:not([href*="moodlearn"])')?.href;
+  let externalSource = external ? 'dom-anchor' : null;
   if (!external) {
     const m = html.match(/url\s*=\s*['"](https?:[^'"]+)['"]/i)
            || html.match(/window\.location(?:\.href)?\s*=\s*['"](https?:[^'"]+)['"]/i)
            || html.match(/<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"';]+)/i);
-    if (m) external = m[1].trim();
+    if (m) { external = m[1].trim(); externalSource = 'regex'; }
   }
   // If we got redirected to a non-Moodle URL but never found an external link,
   // use the final URL as the external.
-  if (!external && finalUrl && !finalUrl.includes('moodlearn')) external = finalUrl;
-  if (!external) return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
+  if (!external && finalUrl && !finalUrl.includes('moodlearn')) {
+    external = finalUrl;
+    externalSource = 'redirected-final-url';
+  }
+  trace.externalSource = externalSource;
+  trace.externalUrl = external;
+  if (!external) {
+    trace.finalResult = 'link-no-external';
+    URL_DEBUG_TRACES.push(trace);
+    return [{ kind: 'link', type: 'url', name: item.name, url: item.url }];
+  }
 
   // Step 3: classify
   if (isStreamingUrl(external)) {
     return [{ kind: 'recording', type: 'recording', name: item.name, url: external }];
   }
   if (!isAllowedHost(external)) {
+    trace.finalResult = 'link-host-not-allowed';
+    URL_DEBUG_TRACES.push(trace);
     return [{ kind: 'link', type: 'url', name: item.name, url: external }];
   }
 
   // Step 4: fetch the external URL. Be aggressive — if it's a file, save it;
   // if it's an HTML page that contains a direct download link to a PDF/Office
   // file, follow that one level deeper.
+  let externalHtml = null;
   try {
     const r = await fetch(external, { credentials: 'include', redirect: 'follow' });
+    const rct = (r.headers.get('Content-Type') || '').toLowerCase();
+    const rcd = (r.headers.get('Content-Disposition') || '').toLowerCase();
+    const rFinalUrl = r.url || external;
+    trace.stages.push({
+      stage: 'external',
+      requested: external,
+      finalUrl: rFinalUrl,
+      status: r.status,
+      contentType: rct,
+      contentDisposition: rcd,
+      headers: _headersToObj(r.headers),
+    });
     if (r.ok) {
-      const rct = (r.headers.get('Content-Type') || '').toLowerCase();
-      const rcd = (r.headers.get('Content-Disposition') || '').toLowerCase();
-      const rFinalUrl = r.url || external;
-
       if (isFileResponse(rct, rcd, rFinalUrl)) {
         const blob = await r.blob();
         const fn = filenameFromResponse(r)
@@ -2449,33 +2531,68 @@ async function fetchUrlActivity(item) {
       }
 
       // External page is HTML — look for an obvious "download this" link.
-      const externalHtml = await r.text();
+      externalHtml = await r.text();
+      trace.stages[trace.stages.length - 1].htmlSnippet = _capHtml(externalHtml);
       const externalDoc = new DOMParser().parseFromString(externalHtml, 'text/html');
+      // Enumerate all anchor candidates for the debug trace, so we can
+      // see what the meyda (or whatever) page actually exposes.
+      const allCandidates = [...externalDoc.querySelectorAll('a[href], button[onclick], button[data-href], [data-download], iframe[src], embed[src], object[data]')].slice(0, 50).map(el => ({
+        tag: el.tagName.toLowerCase(),
+        text: (el.textContent || '').trim().slice(0, 120),
+        href: el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('onclick') || el.getAttribute('src') || el.getAttribute('data') || null,
+        download: el.getAttribute('download') || null,
+        classes: el.className || null,
+      }));
+      trace.stages[trace.stages.length - 1].candidates = allCandidates;
       const downloadCand = externalDoc.querySelector(
         'a[download], a[href*=".pdf" i], a[href*=".docx" i], a[href*=".pptx" i],'
-        + ' a[href*="forcedownload" i], a[href*="getfile" i], a[href*="syllabus" i]'
+        + ' a[href*="forcedownload" i], a[href*="getfile" i], a[href*="syllabus" i],'
+        + ' a[href*="download" i], a[href*="print" i], a[href*="export" i]'
       );
       if (downloadCand) {
         const downloadUrl = new URL(downloadCand.getAttribute('href'), rFinalUrl).href;
+        trace.downloadCandidate = { url: downloadUrl, text: downloadCand.textContent.trim().slice(0, 100) };
         if (isAllowedHost(downloadUrl)) {
           try {
             const dr = await fetch(downloadUrl, { credentials: 'include', redirect: 'follow' });
-            if (dr.ok) {
-              const dct = (dr.headers.get('Content-Type') || '').toLowerCase();
-              const dcd = (dr.headers.get('Content-Disposition') || '').toLowerCase();
-              if (isFileResponse(dct, dcd, dr.url || downloadUrl)) {
-                const blob = await dr.blob();
-                const fn = filenameFromResponse(dr)
-                        || (sanitizeFilename(item.name) + (extFromCT(dct) || extFromUrl(downloadUrl) || ''));
-                return [{ path: fn, blob }];
-              }
+            const dct = (dr.headers.get('Content-Type') || '').toLowerCase();
+            const dcd = (dr.headers.get('Content-Disposition') || '').toLowerCase();
+            trace.stages.push({
+              stage: 'download-candidate',
+              requested: downloadUrl,
+              finalUrl: dr.url,
+              status: dr.status,
+              contentType: dct,
+              contentDisposition: dcd,
+              headers: _headersToObj(dr.headers),
+            });
+            if (dr.ok && isFileResponse(dct, dcd, dr.url || downloadUrl)) {
+              const blob = await dr.blob();
+              const fn = filenameFromResponse(dr)
+                      || (sanitizeFilename(item.name) + (extFromCT(dct) || extFromUrl(downloadUrl) || ''));
+              return [{ path: fn, blob }];
             }
-          } catch {}
+            // Capture the body for debug if we still don't have a file.
+            try {
+              const dt = await dr.text();
+              trace.stages[trace.stages.length - 1].htmlSnippet = _capHtml(dt, 40000);
+            } catch {}
+          } catch (e) {
+            trace.stages.push({ stage: 'download-candidate', requested: downloadUrl, error: String(e) });
+          }
+        } else {
+          trace.downloadCandidate.skippedBecause = 'host-not-allowed';
         }
+      } else {
+        trace.downloadCandidate = null;
       }
     }
-  } catch {}
+  } catch (e) {
+    trace.stages.push({ stage: 'external', requested: external, error: String(e) });
+  }
 
+  trace.finalResult = 'link-no-download-found';
+  URL_DEBUG_TRACES.push(trace);
   return [{ kind: 'link', type: 'url', name: item.name, url: external }];
 }
 

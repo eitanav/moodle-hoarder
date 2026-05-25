@@ -4,6 +4,30 @@
 
 ---
 
+## v1.21.1 — URL debug sidecar (לחקירת בעיית הסילבוס)
+
+**הקשר:** המשתמש דיווח שסילבוס לא מוריד — כתובת `https://meyda.ariel.ac.il/Portals/ex/show-syllabus/<id>` (תת-דומיין אריאל, אז `isAllowedHost` כן מאשר אותו) מגיעה כ-`{kind:'link'}` ל-links.txt במקום כקובץ. אני צריך לראות בדיוק מה meyda מחזיר כדי לכתוב handler מתאים.
+
+**הפתרון לחקירה (לא לפתרון סופי עדיין):** `fetchUrlActivity` מוסיף instrumentation מלא. לכל URL activity שנכשל בהפיכה לקובץ:
+- שלב 1 (mod/url) — finalUrl, status, headers, HTML snippet (≤80KB)
+- שלב external — אותו דבר + רשימת **כל** ה-anchors / buttons / iframes / embeds שמצאתי בעמוד (עד 50, עם text + href + class)
+- שלב download-candidate — אם מצאנו לינק שנראה כמו "download" / "print" / "syllabus" וכו', עוקבים אחריו וגם מתעדים
+- `finalResult` — `link-on-fetch-error` / `link-no-external` / `link-host-not-allowed` / `link-no-download-found`
+
+הכל נשמר ב-`_url-debug.json` בתוך ה-ZIP, **רק אם** יש כשלונות. אם הכל ירד כקבצים — אין debug file (חוסך מקום).
+
+**שיפור נלווי:** הסלקטור של download candidates הורחב — קודם היה רק PDF/DOCX/syllabus/forcedownload/getfile, עכשיו גם `download`, `print`, `export` (לכיסוי דפוסים שלא ראינו עדיין).
+
+**הוראה למשתמש:**
+1. הורד קורס כרגיל עם הסילבוס מסומן
+2. פתח את ה-ZIP, חפש `_url-debug.json`
+3. שלח אלי את הקטע של ה-trace שמכיל "meyda" ב-`externalUrl`
+4. אני אכתוב handler ספציפי לפי מה שאני רואה
+
+**שים לב:** ה-debug file עלול לכלול קטעי HTML עם מידע אישי (שמך, מספר הקורס, ת"ז וכו' אם מופיעים בדף meyda). סקור לפני שאתה משתף.
+
+---
+
 ## v1.21.0 — VTT → TXT converter standalone
 
 **הבעיה לפני:** v1.20.1 הפך את ברירת המחדל ל-txt, אבל מה עם VTT שכבר יש לך — מהורדה קודמת, מ-Zoom ישיר, או מהורדות לפני שהפיצ'ר היה קיים? הקובץ הוא subtitle format עם cue numbers, timestamps והרבה רעש. אי אפשר פשוט לפתוח אותו ולקרוא.
