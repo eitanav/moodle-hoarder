@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Moodle Hoarder — הגדרות</title>
+<script src="theme-bootstrap.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --row: #f9fafb;
+    --row-hover: #f3f4f6;
+    --accent: #dc2867;
+    --accent-2: #ff8c3c;
+    --ok: #1b5e20;
+    --err: #b00020;
+  }
+  /* Ariel-blue accent palette */
+  :root.mh-accent-blue {
+    --accent: #003c71;
+    --accent-2: #0e72ed;
+  }
+
+  /* Dark theme — applies when forced (.mh-theme-dark) OR when system prefers
+     dark and no explicit theme class is on the root. */
+  :root.mh-theme-dark,
+  :root.mh-theme-dark body { color-scheme: dark; }
+  :root.mh-theme-dark {
+    --bg: #1a1a1a;
+    --fg: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+    --row: #262626;
+    --row-hover: #333;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.mh-theme-light):not(.mh-theme-dark) {
+      --bg: #1a1a1a;
+      --fg: #f3f4f6;
+      --muted: #9ca3af;
+      --border: #374151;
+      --row: #262626;
+      --row-hover: #333;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.55;
+  }
+  header {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header img { width: 40px; height: 40px; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  header .sub { font-size: 12px; opacity: .9; margin-top: 3px; }
+  main {
+    max-width: 760px;
+    margin: 20px auto;
+    padding: 0 32px 60px;
+  }
+  section {
+    margin-bottom: 28px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  section:last-child { border-bottom: none; }
+  section h2 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    color: var(--accent);
+  }
+  section .desc {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0 0 12px;
+  }
+
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .row .label {
+    flex: 1;
+    min-width: 0;
+  }
+  .row .label .name {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .row .label .hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .row .control {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* iOS-style toggle */
+  .toggle {
+    appearance: none;
+    width: 40px;
+    height: 22px;
+    background: var(--border);
+    border-radius: 22px;
+    position: relative;
+    cursor: pointer;
+    transition: background .15s;
+    margin: 0;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    top: 2px;
+    right: 2px;
+    transition: right .15s, left .15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .toggle:checked {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  }
+  .toggle:checked::after { right: 20px; }
+
+  /* radio group as button row */
+  .radios {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .radios label {
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    background: var(--row);
+  }
+  .radios label.active {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+  }
+  .radios input { display: none; }
+
+  input[type="text"] {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .filetypes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px 16px;
+    margin-top: 8px;
+  }
+  .filetypes label {
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  button.action {
+    padding: 8px 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+
+  #status {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #43a047, #1b5e20);
+    color: white;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #status.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  #status::before {
+    content: '✓';
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    text-align: center;
+    border: 2px solid white;
+    border-radius: 50%;
+    font-weight: 900;
+  }
+
+  /* History dashboard */
+  table.history {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  table.history th, table.history td {
+    padding: 6px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+  }
+  table.history th {
+    background: var(--row);
+    font-weight: 600;
+  }
+  table.history tr:hover { background: var(--row-hover); }
+  table.history .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 24px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-128.png" alt="">
+  <div>
+    <h1 data-i18n="options.header.title">Moodle Hoarder — הגדרות</h1>
+    <div class="sub" data-i18n="options.header.sub">כל הטוגלים והאופציות במקום אחד</div>
+  </div>
+</header>
+
+<main>
+
+<section>
+  <h2 data-i18n="opt.section.language">שפת ממשק</h2>
+  <p class="desc">בחר את שפת הממשק של התוסף (לא משפיע על תוכן הקורסים)</p>
+  <div class="row">
+    <div class="label">
+      <div class="name" data-i18n="opt.lang.title">שפת ממשק</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.lang.hint">"אוטומטי" יקבע את השפה לפי הקורס הפתוח כעת ב-Moodle (לפי תג ה-<code>&lt;html lang&gt;</code>). אחרת — בחירה ידנית.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="uiLanguage">
+        <label><input type="radio" name="uiLanguage" value="auto"><span data-i18n="opt.lang.auto">אוטומטי</span></label>
+        <label><input type="radio" name="uiLanguage" value="he"><span data-i18n="opt.lang.he">עברית</span></label>
+        <label><input type="radio" name="uiLanguage" value="en"><span data-i18n="opt.lang.en">English</span></label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.appearance">מראה</h2>
+  <p class="desc">בהיר / כהה / לפי הגדרת מערכת ההפעלה</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">ערכת נושא</div>
+      <div class="hint">"אוטומטי" יתאם את עצמו להגדרת מצב כהה של Windows/macOS. "בהיר" / "כהה" כופים בצורה ידנית.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="theme">
+        <label><input type="radio" name="theme" value="auto">אוטומטי</label>
+        <label><input type="radio" name="theme" value="light">בהיר</label>
+        <label><input type="radio" name="theme" value="dark">כהה</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">צבע ראשי</div>
+      <div class="hint">"כתום-ורוד" הוא הצבע הברירת-מחדל של התוסף. "כחול אריאל" מתאים לערכת הצבעים של אוניברסיטת אריאל.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="accentColor">
+        <label><input type="radio" name="accentColor" value="orange-pink">כתום-ורוד</label>
+        <label><input type="radio" name="accentColor" value="blue-ariel">כחול אריאל</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">מצב קומפקטי</div>
+      <div class="hint">פריטים בשורה אחת קטנה במקום שתיים. נוח לקורסים גדולים עם הרבה פריטים.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="compactMode"></div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.zip">מבנה ה-ZIP</h2>
+  <p class="desc">איך לארגן את הקבצים בתוך קובץ ה-ZIP שמורד</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">פריסה</div>
+      <div class="hint">"לפי קטעים" יוצר תיקייה לכל קטע במודל. "הכל ביחד" שם את כל הקבצים בתיקייה אחת שטוחה. "שניהם" מייצר את שני המבנים בתוך אותו ZIP (ברירת מחדל, ZIP גדול פי שניים).</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="zipLayout">
+        <label><input type="radio" name="zipLayout" value="sections">לפי קטעים</label>
+        <label><input type="radio" name="zipLayout" value="flat">הכל ביחד</label>
+        <label><input type="radio" name="zipLayout" value="both">שניהם</label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.download">הורדה</h2>
+  <p class="desc">איפה וכיצד נשמרים הקבצים</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">"Save As" — לבחור איפה לשמור</div>
+      <div class="hint">בכל הורדה ייפתח דיאלוג של Chrome לבחירת מיקום. ברירת מחדל כבוי — הקובץ יורד אוטומטית לתיקיית Downloads.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="saveAs"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">תת-תיקייה ב-Downloads</div>
+      <div class="hint">למשל <code>Moodle/2026-spring/</code> — Chrome לא מאפשר נתיב מוחלט מתוסף, אבל אפשר ליצור תת-תיקייה בתוך Downloads. השאר ריק כדי לשמור ישירות ב-Downloads.</div>
+    </div>
+    <div class="control" style="width: 240px;">
+      <input type="text" data-setting="downloadSubfolder" placeholder="Downloads/...">
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.content">תוכן</h2>
+  <p class="desc">אילו פעילויות לכלול בהורדה</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">כלילת ציונים</div>
+      <div class="hint">שולף את העמוד Grader Report של הקורס ומוסיף ל-ZIP כקובץ <code>ציונים.csv</code>. <strong>שים לב — כשמשתפים את ה-ZIP, גם הציונים שלך נכללים.</strong> ברירת מחדל כבוי.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="includeGrades"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">כלילת <code>course.json</code></div>
+      <div class="hint">מוסיף ל-ZIP קובץ JSON מובנה עם מבנה הקורס המלא — sections, items, types, URLs, גדלי קבצים, errors. שימושי לאינטגרציות עם Notion / Anki / Sheets / סקריפטים. קטן (~10-50KB), לא כולל את הקבצים עצמם. ברירת מחדל פעיל.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="includeJson"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">סף גודל קובץ (MB)</div>
+      <div class="hint">קבצים גדולים מהסף לא יסומנו בדיפולט בבורר הקורס — תקבל אזהרה ותוכל לסמן ידנית. <code>0</code> = מבוטל (כל הקבצים נבחרים כרגיל).</div>
+    </div>
+    <div class="control" style="width: 100px;">
+      <input type="number" min="0" step="1" data-setting="maxFileSizeMB" placeholder="0">
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">סוגי פעילויות מסומנים כברירת מחדל</div>
+      <div class="hint">בעת סריקה של קורס, הפעילויות האלה מסומנות אוטומטית. עדיין ניתן לבחור ידנית פר קורס.</div>
+      <div class="filetypes" id="fileTypes"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Zoom</h2>
+  <p class="desc">הגדרות הקלטות Zoom (חלות רק כשפותחים דף Zoom Recordings באריאל)</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">חילוץ תמלילים אוטומטי</div>
+      <div class="hint">אחרי שמחלצים URLs של הקלטות, התוסף פותח כל אחת ב-tab רקעי ותופס את ה-VTT (התמליל האוטומטי של Zoom). אם כיבית — תקבל רק קובץ טקסט עם הקישורים, בלי ZIP. <strong>הקלטות בלי תמליל מדולגות אחרי 8 שניות</strong> (בודק שיש UI של תמליל בדף).</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="extractTranscripts"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">פורמט תמלילים</div>
+      <div class="hint">"שניהם" — גם <code>.vtt</code> מקורי (עם timestamps, יושב כסאבטייטל על וידאו) וגם <code>.txt</code> נקי לקריאה (עם דוברים ופסקאות). "רק טקסט" / "רק VTT" מקטינים את ה-ZIP.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="transcriptFormats">
+        <label><input type="radio" name="transcriptFormats" value="both">שניהם</label>
+        <label><input type="radio" name="transcriptFormats" value="txt">רק טקסט</label>
+        <label><input type="radio" name="transcriptFormats" value="vtt">רק VTT</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">מספר הקלטות במקביל</div>
+      <div class="hint">כמה תמלילים לחלץ בו-זמנית. 3 זה איזון טוב בין מהירות לעומס. גבוה יותר (4-5) ייתכן שיגרום ל-Zoom לחסום או יכבד על המחשב. תחום: 1-5.</div>
+    </div>
+    <div class="control" style="width: 100px;">
+      <input type="number" min="1" max="5" step="1" data-setting="transcriptConcurrency" placeholder="3">
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.rightclick">קליק ימני</h2>
+  <p class="desc">התנהגות התפריט "הורד עם Moodle Hoarder"</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">פעולה</div>
+      <div class="hint">"מיד" — הורד מיד את הקובץ. "תור" — הוסף לרשימה ובסיום הורד את כולם כ-ZIP אחד. "שאל" — תפריט קצר בכל קליק.</div>
+    </div>
+    <div class="control">
+      <div class="radios" data-setting="rightClickBehavior">
+        <label><input type="radio" name="rightClickBehavior" value="immediate">מיד</label>
+        <label><input type="radio" name="rightClickBehavior" value="queue">תור</label>
+        <label><input type="radio" name="rightClickBehavior" value="ask">שאל</label>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name">"Save As" בקליק ימני</div>
+      <div class="hint">פתח דיאלוג לבחירת מיקום בכל הורדה דרך קליק ימני (גם כשהטוגל הגלובלי כבוי).</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="rightClickSaveAs"></div>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.history">היסטוריה</h2>
+  <p class="desc">כל הקורסים שהורדת — לחיצה כדי לפתוח שוב את עמוד הקורס במודל</p>
+  <div id="historyContainer">
+    <table class="history" id="historyTable"></table>
+  </div>
+  <div style="margin-top: 12px; display: flex; gap: 8px;">
+    <button class="action secondary" id="clearHistory">נקה היסטוריה</button>
+  </div>
+</section>
+
+<section>
+  <h2 data-i18n="opt.section.reset">גיבוי</h2>
+  <p class="desc">איפוס כל ההגדרות לברירת המחדל</p>
+  <div class="row">
+    <div class="label">
+      <div class="name">איפוס</div>
+      <div class="hint">מאפס את כל ההגדרות לערכי ברירת המחדל. לא משפיע על היסטוריה או מצב diff.</div>
+    </div>
+    <div class="control">
+      <button class="action secondary" id="resetSettings">אפס הגדרות</button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="status" data-i18n="status.saved">נשמר</div>
+
+<script src="settings.js"></script>
+<script src="i18n.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

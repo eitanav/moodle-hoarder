@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<script src="theme-bootstrap.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --row: #f9fafb;
+    --row-hover: #f3f4f6;
+    --accent: #dc2867;
+    --accent-2: #ff8c3c;
+    --ok: #1b5e20;
+    --err: #b00020;
+    --chip-bg: #fde8ef;
+    --chip-fg: #9a1247;
+    --new-bg: #fff3cd;
+    --new-fg: #7a4e00;
+  }
+  /* Ariel-blue accent palette — overrides --accent / --accent-2 when active. */
+  :root.mh-accent-blue {
+    --accent: #003c71;
+    --accent-2: #0e72ed;
+    --chip-bg: #d6e4f2;
+    --chip-fg: #003c71;
+  }
+  :root.mh-accent-blue.mh-theme-dark,
+  :root.mh-theme-dark.mh-accent-blue {
+    --chip-bg: #15314c;
+    --chip-fg: #9ec5ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root.mh-accent-blue:not(.mh-theme-light) {
+      --chip-bg: #15314c;
+      --chip-fg: #9ec5ec;
+    }
+  }
+
+  /* Dark theme — applies when forced (mh-theme-dark class) OR when system
+     prefers dark and no override class is set. */
+  :root.mh-theme-dark,
+  :root.mh-theme-dark body { color-scheme: dark; }
+  :root.mh-theme-dark {
+    --bg: #1a1a1a;
+    --fg: #f3f4f6;
+    --muted: #b8c0cc;
+    --border: #4a5160;
+    --row: #2a2a2a;
+    --row-hover: #353535;
+    --chip-bg: #4a1530;
+    --chip-fg: #ffb3cc;
+    --new-bg: #4a3a00;
+    --new-fg: #ffd966;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.mh-theme-light):not(.mh-theme-dark) {
+      --bg: #1a1a1a;
+      --fg: #f3f4f6;
+      --muted: #b8c0cc;
+      --border: #4a5160;
+      --row: #2a2a2a;
+      --row-hover: #353535;
+      --chip-bg: #4a1530;
+      --chip-fg: #ffb3cc;
+      --new-bg: #4a3a00;
+      --new-fg: #ffd966;
+    }
+  }
+
+  /* View transitions — quick fade-in when switching popup screens */
+  @keyframes mh-view-in {
+    from { opacity: 0.3; transform: translateY(-3px); }
+    to   { opacity: 1;   transform: translateY(0); }
+  }
+  .mh-view-show { animation: mh-view-in 0.18s ease-out; }
+
+  /* Skeleton loader shown while scanning (ROADMAP #13) */
+  @keyframes mh-skeleton {
+    0%   { opacity: 0.4; }
+    50%  { opacity: 0.7; }
+    100% { opacity: 0.4; }
+  }
+  .mh-skeleton {
+    display: none;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .mh-skeleton.show { display: block; }
+  .mh-skeleton .row {
+    height: 14px;
+    margin: 6px 0;
+    background: var(--row-hover);
+    border-radius: 4px;
+    animation: mh-skeleton 1.2s ease-in-out infinite;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    width: 420px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  header {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header img { width: 28px; height: 28px; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .sub { font-size: 11px; opacity: .9; margin-top: 2px; }
+  main { padding: 12px 14px; }
+
+  button {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: white;
+    transition: transform .05s, opacity .15s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  button.tiny {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .row-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .row-btns button { width: auto; flex: 1; }
+
+  #status { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; }
+
+  .progress-wrap {
+    margin-top: 8px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    width: 0%;
+    transition: width .2s;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toolbar input[type=search] {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .toolbar a {
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .toolbar a:hover { text-decoration: underline; }
+
+  .banner {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: var(--new-bg);
+    color: var(--new-fg);
+    border-radius: 6px;
+    font-size: 12px;
+    display: none;
+  }
+  .banner.show { display: block; }
+  .banner .actions { margin-top: 6px; display: flex; gap: 6px; }
+
+  .summary { font-size: 12px; color: var(--muted); margin: 6px 0; }
+  .summary .count {
+    display: inline-block;
+    color: white;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-weight: 700;
+    font-size: 12px;
+    min-width: 18px;
+    text-align: center;
+  }
+
+  .sections {
+    margin-top: 4px;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .section { border-bottom: 1px solid var(--border); }
+  .section:last-child { border-bottom: none; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--row-hover);
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .section-header .sec-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-header .sec-count { font-size: 10px; color: var(--muted); font-weight: 400; }
+  .section-header .caret { transition: transform .15s; }
+  .section.collapsed .caret { transform: rotate(-90deg); }
+  .section.collapsed .section-items { display: none; }
+
+  .section-items { list-style: none; margin: 0; padding: 0; }
+  .section-items li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 26px;
+    font-size: 12px;
+    background: var(--row);
+  }
+  /* Compact mode: tighter row spacing (ROADMAP #1) */
+  body.mh-compact .section-items li { padding: 2px 10px 2px 26px; font-size: 11px; }
+  body.mh-compact ul.courses li { padding: 4px 10px; }
+  body.mh-compact .sections { max-height: 380px; }
+  .section-items li:hover { background: var(--row-hover); }
+  .section-items li.hidden { display: none; }
+  .section-items input[type=checkbox] { margin: 0; cursor: pointer; }
+  .section-items .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section-items .chip {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: var(--chip-bg);
+    color: var(--chip-fg);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .section-items .chip.new { background: var(--new-bg); color: var(--new-fg); }
+  /* File size chips (ROADMAP #19). Neutral by default; turns red when the
+     file is over the user's threshold and was therefore unchecked. */
+  .section-items .chip.size {
+    background: transparent;
+    color: var(--muted);
+    text-transform: none;
+    font-weight: 500;
+    border: 1px solid var(--border);
+  }
+  .section-items .chip.size.oversized {
+    background: #fde2e2;
+    color: #9a1212;
+    border-color: #f5b7b7;
+    font-weight: 600;
+  }
+  :root.mh-theme-dark .section-items .chip.size.oversized,
+  :root.mh-theme-dark .section-items .chip.size.oversized {
+    background: #4a1515;
+    color: #ffb0b0;
+    border-color: #8a2424;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.mh-theme-light) .section-items .chip.size.oversized {
+      background: #4a1515;
+      color: #ffb0b0;
+      border-color: #8a2424;
+    }
+  }
+  .section-items li.oversized .name { opacity: 0.7; }
+  /* Inline progress indicator while HEAD pre-scan is running. */
+  #sizeScanStatus {
+    display: none;
+    font-size: 11px;
+    color: var(--muted);
+    margin: 4px 0 6px 0;
+  }
+  #sizeScanStatus.show { display: block; }
+  #sizeScanStatus.show:not(.done)::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: -1px;
+    animation: mh-spin 0.8s linear infinite;
+  }
+  @keyframes mh-spin { to { transform: rotate(360deg); } }
+
+  ul.courses { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  ul.courses li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 12px; border-bottom: 1px solid var(--border); background: var(--row); }
+  ul.courses li:last-child { border-bottom: none; }
+  ul.courses li:hover { background: var(--row-hover); }
+  ul.courses .name { flex: 1; }
+  ul.courses .id { font-size: 10px; color: var(--muted); }
+
+  #log {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    max-height: 120px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    display: none;
+    font-family: 'Consolas', monospace;
+  }
+  #log.show { display: block; }
+  #log .err { color: var(--err); }
+  #log .ok { color: var(--ok); }
+
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icons/icon-48.png" alt="">
+  <div style="flex:1;">
+    <h1 data-i18n="app.title">Moodle Hoarder</h1>
+    <div class="sub" data-i18n="app.tagline">אוסף לך הכל מהמודל לתיק אחד</div>
+  </div>
+  <button id="openSettings" data-i18n-attr="title:app.settings.title" title="הגדרות" style="background:transparent;border:none;color:white;cursor:pointer;font-size:18px;padding:6px;width:auto;">⚙</button>
+</header>
+
+<main>
+  <div id="initial">
+    <button id="scan" data-i18n="btn.scan">סרוק</button>
+    <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+    <div id="skeleton" class="mh-skeleton">
+      <div class="row" style="width:70%"></div>
+      <div class="row" style="width:90%"></div>
+      <div class="row" style="width:55%"></div>
+      <div class="row" style="width:80%"></div>
+    </div>
+    <div id="queueArea" style="display:none; margin-top:10px;">
+      <button id="downloadQueue" style="background: var(--row); color: var(--fg); border: 1px solid var(--border);">
+        <span id="queueCountText">0 פריטים בתור</span> · הורד הכל כ-ZIP
+      </button>
+      <a id="clearQueue" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
+    </div>
+    <!-- Standalone VTT→TXT converter. Takes any .vtt the user has — from
+         a previous run, downloaded directly from Zoom, or anywhere — and
+         spits out the cleaned TXT. Reuses vttToCleanText. -->
+    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);">
+      <label for="vttFile" id="vttConvertBtn" style="display:block; padding: 8px 12px; background: var(--row); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center;">
+        🔄 המר קובץ VTT לטקסט נקי
+      </label>
+      <input id="vttFile" type="file" accept=".vtt,text/vtt,text/plain" multiple style="display:none;">
+      <div class="hint" style="margin-top: 6px;">בחר קובץ <code>.vtt</code> מהמחשב (אפשר גם כמה ביחד). יורד <code>.txt</code> עם דוברים ופסקאות.</div>
+    </div>
+  </div>
+
+  <div id="picker" style="display:none;">
+    <div class="toolbar">
+      <input id="search" type="search" data-i18n-attr="placeholder:picker.search.placeholder" placeholder="חיפוש..." list="searchHistory">
+      <a id="selAll" data-i18n="btn.select.all">הכל</a>
+      <a id="selNone" data-i18n="btn.select.none">ניקוי</a>
+      <a id="selDefaults" data-i18n="btn.select.defaults">איפוס</a>
+      <a id="expandAll" data-i18n-attr="title:picker.expand.all.title" title="פתח/סגור הכל">▾</a>
+    </div>
+    <datalist id="searchHistory"></datalist>
+    <div class="banner" id="diffBanner">
+      <div id="diffText"></div>
+      <div class="actions">
+        <button class="tiny" id="selOnlyNew">בחר רק חדשים</button>
+        <button class="tiny secondary" id="selAllInBanner">הכל</button>
+      </div>
+    </div>
+    <div class="summary"><span class="count" id="selCount">0</span> <span data-i18n="picker.selected.of">מתוך</span> <span id="totCount">0</span> <span data-i18n="picker.selected.suffix">נבחרו</span></div>
+    <div id="sizeScanStatus"></div>
+    <div class="sections" id="sections"></div>
+    <div class="row-btns">
+      <button class="secondary" id="back" data-i18n="btn.back">חזור</button>
+      <button id="download" data-i18n="btn.download.zip">הורד ל-ZIP</button>
+    </div>
+  </div>
+
+  <div id="multiPicker" style="display:none;">
+    <div class="summary"><span data-i18n="multi.found.prefix">נמצאו</span> <span class="count" id="totCourses">0</span> <span data-i18n="multi.found.suffix">קורסים בעמוד "הקורסים שלי".</span></div>
+    <div class="toolbar">
+      <input id="searchCourses" type="search" data-i18n-attr="placeholder:multi.search.placeholder" placeholder="חיפוש קורס...">
+      <a id="courseAll" data-i18n="btn.select.all">הכל</a>
+      <a id="courseNone" data-i18n="btn.select.none">ניקוי</a>
+    </div>
+    <ul class="courses" id="courses"></ul>
+    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+        <input type="checkbox" id="onlyNewMulti">
+        <span data-i18n="multi.only.new">הורד רק קבצים חדשים בכל קורס</span>
+      </label>
+    </div>
+    <div class="row-btns">
+      <button class="secondary" id="backMulti" data-i18n="btn.back">חזור</button>
+      <button id="downloadMulti" data-i18n="btn.download.all">הורד את כל הקורסים שנבחרו</button>
+    </div>
+  </div>
+
+  <div id="deadlinesView" style="display:none;">
+    <div class="summary"><span data-i18n="deadlines.found.prefix">נמצאו</span> <span class="count" id="totDeadlines">0</span> <span data-i18n="deadlines.found.suffix">מטלות (ללא המוסתרות).</span></div>
+    <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
+    <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
+    <div class="hint" style="margin-top:6px;" data-i18n="deadlines.help.ical">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.</div>
+    <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
+    <div class="row-btns">
+      <button class="secondary" id="backDeadlines" data-i18n="btn.back">חזור</button>
+      <button id="exportDeadlines" data-i18n="btn.export.deadlines">ייצא ליומן</button>
+    </div>
+  </div>
+
+  <div id="zoomPicker" style="display:none;">
+    <div class="summary"><span data-i18n="zoom.found.prefix">נמצאו</span> <span class="count" id="totZoom">0</span> <span data-i18n="zoom.found.suffix">הקלטות. בחר אילו לפענח קישורים אליהן:</span></div>
+    <div class="toolbar">
+      <input id="searchZoom" type="search" data-i18n-attr="placeholder:zoom.search.placeholder" placeholder="חיפוש בהקלטות...">
+      <a id="zoomAll" data-i18n="btn.select.all">הכל</a>
+      <a id="zoomNone" data-i18n="btn.select.none">ניקוי</a>
+    </div>
+    <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
+    <ul class="courses" id="zoomItems"></ul>
+    <!-- Phase 1 transcripts: controlled by settings.extractTranscripts
+         (default ON). When on, the ZIP includes per-recording .vtt and
+         .txt files alongside the URL list. Toggle in הגדרות → Zoom.
+         The debug checkbox below is only for re-investigating new Zoom
+         tenants — leave unchecked for normal use. -->
+    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+        <input type="checkbox" id="zoomDebugNetwork">
+        <span>🔬 תלכוד debug של network (לפיתוח בלבד — לא נדרש לתמלילים רגילים)</span>
+      </label>
+    </div>
+    <div class="row-btns">
+      <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
+      <button id="downloadZoom" data-i18n="btn.decode.zoom">פענח קישורים והורד</button>
+    </div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div id="status"></div>
+  <div id="log"></div>
+</main>
+
+<script src="settings.js"></script>
+<script src="i18n.js"></script>
+<script src="zip.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

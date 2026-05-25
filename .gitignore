@@ -1,0 +1,29 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+*.tmp
+
+# Build output / packaged extensions
+*.zip
+*.crx
+*.pem
+dist/
+build/
+
+# Node (if you ever add tooling)
+node_modules/
+package-lock.json
+
+# Local secrets
+.env
+.env.local
