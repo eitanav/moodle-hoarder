@@ -4,6 +4,55 @@
 
 ---
 
+## v1.23.0 — Phase 0 — Debug capture לחקירת הורדת הקלטות וידאו
+
+המשתמש ביקש פיצ'ר חדש קריטי: **הורדת הקלטות וידאו אמיתיות מ-Zoom**, לא רק URLs וקטעי תמליל. לפני שאני כותב שורת קוד אחת של ההורדה עצמה, אני חייב לדעת איך Zoom של אריאל מגיש את הוידאו:
+
+1. **MP4 ישיר** — fetch אחד, signed URL. קל יחסית להוריד.
+2. **HLS** — manifest .m3u8 + עשרות-מאות segments .ts. דורש הרכבה מורכבת.
+3. **DRM** — מוצפן, אי אפשר.
+
+**Phase 0 = debug capture ייעודי לזיהוי הזרימה.** מבוסס על אותה ארכיטקטורה של ה-debug של תמלילים (v1.18) שעבד פעם הראשונה.
+
+### מה שונה ב-v1.23
+
+`captureZoomNetworkDebug` שודרג מ-v1 ל-v2:
+
+- **monkey-patch רחב יותר** — תופס video/audio/mp4/m3u8/ts/octet-stream/mpegurl/range, לא רק VTT
+- **MediaSource monitor חדש** — אם הנגן משתמש ב-MSE (HLS/DASH), כל `addSourceBuffer` ו-`appendBuffer` עם הגודל של ה-buffer מתועד. זה הסיגנל המכריע לזהות HLS/DASH.
+- **mediaElementSrcs** — MutationObserver שתופס `<video src>` ו-`<audio src>` שהנגן מציב — לפעמים זה blob URL או MP4 ישיר
+- **לחיצה אוטומטית על Play** — בלי זה הנגן לא מתחיל לזרום וידאו. מנסה 10+ סלקטורים שונים (zm-control-button-play, vjs-play-control, role="button" aria-label="play" וכו')
+- **20 שניות streaming** — מספיק לראות byte-range chunks או segments מרובים
+- **classification מובנה** ב-JSON output — כל request מקוטלג מראש ל-videoCandidates / hlsManifests / hlsSegments / transcriptCandidates / apiCallsSample. אני לא צריך לחפש בידיים בתוך מאות requests.
+- **content-range + accept-ranges + request headers** מתועדים — חשובים לזיהוי האם השרת תומך ב-range requests (ביצוע סטרימי)
+
+### Toggle
+
+הצ'קבוקס שכבר היה בפיקר Zoom שונה תווית: 🎬 (במקום 🔬) ועדכון תווית — "לחקירת הורדת וידאו". ה-cap הורד מ-5 ל-2 הקלטות (לוידאו אין צורך בהרבה דגימות).
+
+### איך לבחון
+
+1. סרוק דף Zoom של אריאל
+2. סמן 1-2 הקלטות (מעוטות — כל אחת לוקחת ~25 שניות)
+3. **סמן את ה-checkbox 🎬**
+4. לחץ "פענח קישורים והורד"
+5. ה-extension עושה את הזרימה הרגילה (URL + תמלילים), אחר כך פותח את ההקלטה הראשונה ב-tab רקעי, לוחץ Play, מקליט 20 שניות
+6. Save As של `zoom-network-debug_<date>.json`
+7. **שלח אלי**
+
+### מה אני אחפש ב-JSON
+
+ב-`results[0].classification`:
+
+- **`videoCandidates`** ארוך וכל item הוא mp4 → **MP4 ישיר**, קל יחסית. Phase 1 ייקח 4-6 שעות.
+- **`hlsManifests`** קיים → **HLS**. צריך להוריד manifest + לפענח segments. Phase 1 ייקח 10-15 שעות.
+- **`mseActivity`** ארוך + הרבה appendBuffer → **MSE/HLS וודאי**. הכי מסובך.
+- **כלום מהאלה אבל הוידאו ניגן** → DRM / MediaSource מוצפן. הפיצ'ר לא ישים.
+
+ה-`playClicked` יראה לי איזה selector תפס את כפתור ה-Play (אם בכלל). אם null — לא הצלחתי ללחוץ ולכן הוידאו לא ניגן. אצטרך לעדכן את הסלקטורים.
+
+---
+
 ## v1.22.2 — meyda detour מושהה (השרת שבור, לא הקוד)
 
 המשתמש הריץ ניסיון שלישי. הפעם debug snapshot חשף משהו מכריע:
