@@ -1319,6 +1319,37 @@ $('downloadZoom').addEventListener('click', async () => {
     notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
   }
 
+  // Recording video download (v1.24). Opt-in. For each recording that
+  // produced a share URL, open it, capture the signed MP4 URL, and hand
+  // it to chrome.downloads — which streams to disk in the browser
+  // process, so closing the popup mid-download is fine.
+  if (CACHED_SETTINGS?.downloadRecordings && withUrls.length > 0) {
+    const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
+    const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    setStatus(`🎥 מחלץ קישורי וידאו ל-${withUrls.length} הקלטות (${recConc} במקביל)...`);
+    let recResults = [];
+    try {
+      recResults = await downloadZoomRecordings(
+        withUrls.map(r => ({
+          url: r.shareUrls[0],
+          topic: r.topic,
+          date: r.date,
+          meetingId: r.meetingId,
+        })),
+        (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מתחיל הורדה`),
+        recConc,
+        subfolder,
+      );
+    } catch (e) {
+      setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
+      recResults = [];
+    }
+    const okR = recResults.filter(r => r.downloadId).length;
+    const failR = recResults.length - okR;
+    setStatus(`🎥 ${okR}/${recResults.length} הקלטות החלו לרדת${failR ? ` (${failR} נכשלו)` : ''}. ההורדה ממשיכה ברקע — אפשר לסגור.`);
+    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו החלו לרדת`);
+  }
+
   // Phase 0 debug capture — still available via the picker checkbox for
   // re-investigating future Zoom tenant changes. Runs AFTER transcripts
   // (so the same URLs are reused).
@@ -1543,6 +1574,129 @@ async function extractOneTranscript(rec) {
 // Build a friendly filename stem for one recording. Uses the topic and
 // a normalised date (YYYY-MM-DD_HH-MM) when parseable, falling back to
 // a sanitised version of whatever Zoom gave us.
+// ========== Recording video download (v1.24) ==========
+// Confirmed via Phase 0 debug: Ariel's Zoom serves recordings as direct
+// signed MP4 URLs on ssrweb.zoom.us, set as the <video> element's src.
+// No HLS, no DRM, no MSE. The signed URL carries its own CloudFront
+// signature so it works standalone — we hand it straight to
+// chrome.downloads.download, which streams to disk in the browser
+// process (survives popup close, no memory pressure).
+//
+// extractRecordingUrl opens the playback page in a hidden tab, clicks
+// Play, and polls the <video> element for its currentSrc / src. Returns
+// the signed MP4 URL or null.
+async function extractRecordingUrl(rec, onStatus) {
+  let tab = null;
+  const INITIAL_SETTLE = 3500;
+  const HARD_TIMEOUT_MS = 25000;
+  try {
+    tab = await chrome.tabs.create({ url: rec.url, active: false });
+    await new Promise(r => setTimeout(r, INITIAL_SETTLE));
+    // Click Play so the player resolves the signed MP4 and assigns it
+    // to the <video> element. Same selector list as the debug capture.
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => {
+        const candidates = [
+          '.play-control', '.zm-control-button-play', 'button.play-button',
+          '[aria-label="Play" i]', '[aria-label="הפעל" i]', '[title="Play" i]',
+          'button[data-tracking-id*="play" i]', '.center-play-btn',
+          '.vjs-play-control', 'div[role="button"][aria-label*="play" i]',
+        ];
+        for (const sel of candidates) {
+          const el = document.querySelector(sel);
+          if (el && !el.disabled) { try { el.click(); return; } catch {} }
+        }
+        for (const b of document.querySelectorAll('button')) {
+          const tx = (b.textContent || '').trim().toLowerCase();
+          if (tx === 'play' || tx === 'הפעל') { try { b.click(); return; } catch {} }
+        }
+      },
+    });
+    // Poll the <video> src. Zoom assigns the signed MP4 URL shortly after
+    // the play handshake.
+    const start = Date.now();
+    while (Date.now() - start < HARD_TIMEOUT_MS) {
+      await new Promise(r => setTimeout(r, 700));
+      let src = null;
+      try {
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: () => {
+            for (const v of document.querySelectorAll('video')) {
+              const s = v.currentSrc || v.src;
+              // We want the ssrweb signed MP4, not a blob: URL.
+              if (s && /ssrweb\.zoom\.us|\.mp4/i.test(s) && !s.startsWith('blob:')) return s;
+            }
+            // Fallback: any video src at all (even blob — caller decides)
+            for (const v of document.querySelectorAll('video')) {
+              const s = v.currentSrc || v.src;
+              if (s) return s;
+            }
+            return null;
+          },
+        });
+        src = result;
+      } catch {}
+      if (src && !src.startsWith('blob:') && /ssrweb\.zoom\.us|\.mp4/i.test(src)) {
+        return src;
+      }
+      // Keep a blob fallback in mind but keep polling for the real URL.
+      if (src && onStatus) onStatus('waiting-for-signed-url');
+    }
+    return null;
+  } catch (e) {
+    return null;
+  } finally {
+    if (tab?.id) {
+      try { await chrome.tabs.remove(tab.id); } catch {}
+    }
+  }
+}
+
+// Extracts recording URLs for a list of recordings (parallel pool), then
+// hands each to chrome.downloads.download. Returns a summary array of
+// { recording, url?, downloadId?, error? }.
+async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder) {
+  const out = new Array(recordings.length);
+  let nextIdx = 0;
+  let doneCount = 0;
+  const C = Math.max(1, Math.min(concurrency || 2, recordings.length));
+  async function worker() {
+    while (true) {
+      const myIdx = nextIdx++;
+      if (myIdx >= recordings.length) return;
+      const rec = recordings[myIdx];
+      try {
+        const url = await extractRecordingUrl(rec);
+        if (!url) {
+          out[myIdx] = { recording: rec, error: 'Could not capture video URL (player may not have loaded)' };
+        } else if (url.startsWith('blob:')) {
+          out[myIdx] = { recording: rec, error: 'Only a blob: URL was found — cannot download directly (would need MSE capture)' };
+        } else {
+          const stem = transcriptFileStem(rec); // reuse the topic_date naming
+          const fname = `${stem}.mp4`;
+          const filename = subfolder ? `${subfolder}/${fname}` : fname;
+          const downloadId = await chrome.downloads.download({
+            url,
+            filename,
+            saveAs: false,
+          });
+          out[myIdx] = { recording: rec, url, downloadId };
+        }
+      } catch (e) {
+        out[myIdx] = { recording: rec, error: String(e) };
+      }
+      doneCount++;
+      try { onProgress?.(doneCount, recordings.length, rec); } catch {}
+    }
+  }
+  await Promise.all(Array.from({ length: C }, worker));
+  return out;
+}
+
 function transcriptFileStem(rec) {
   const topic = sanitizeFilename(rec.topic || '') || 'recording';
   let dateBit = '';
