@@ -447,15 +447,16 @@
     </div>
     <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
     <ul class="courses" id="zoomItems"></ul>
-    <!-- Phase 1 transcripts: controlled by settings.extractTranscripts
-         (default ON). When on, the ZIP includes per-recording .vtt and
-         .txt files alongside the URL list. Toggle in הגדרות → Zoom.
-         The debug checkbox below is only for re-investigating new Zoom
-         tenants — leave unchecked for normal use. -->
+    <!-- Phase 0 video debug — when checked, after the standard URL +
+         transcript extraction, the extension opens the first selected
+         recording in a hidden tab, clicks Play, monitors fetch/XHR/MSE
+         for 20s, then downloads zoom-network-debug.json so we can see
+         whether the recording is served as direct MP4 or HLS (and
+         therefore plan a real download feature). -->
     <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
         <input type="checkbox" id="zoomDebugNetwork">
-        <span>🔬 תלכוד debug של network (לפיתוח בלבד — לא נדרש לתמלילים רגילים)</span>
+        <span>🎬 תלכוד debug של network (לחקירת הורדת וידאו — איטי, ~25 שניות לכל הקלטה)</span>
       </label>
     </div>
     <div class="row-btns">

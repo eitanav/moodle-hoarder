@@ -1324,15 +1324,18 @@ $('downloadZoom').addEventListener('click', async () => {
   // (so the same URLs are reused).
   if (debugChk?.checked) {
     if (withUrls.length) {
-      setStatus(`🔬 תלכוד network ל-${withUrls.length} הקלטות (אל תסגור)...`);
+      // Cap at 2 recordings — for video debug we just need to see the
+      // request pattern, no need to thrash 5 tabs and tens of seconds.
+      const debugTargets = withUrls.slice(0, 2);
+      setStatus(`🎬 תלכוד network ל-${debugTargets.length} הקלטות (~25 שניות לכל אחת)...`);
       try {
         const debugData = await captureZoomNetworkDebug(
-          withUrls.slice(0, 5).map(r => ({
+          debugTargets.map(r => ({
             url: r.shareUrls[0],
             topic: r.topic,
             date: r.date,
           })),
-          (i, total, rec) => setStatus(`🔬 (${i + 1}/${total}) ${rec.topic || rec.url}`),
+          (i, total, rec) => setStatus(`🎬 (${i + 1}/${total}) ${rec.topic || rec.url} — מנגן 20 שניות`),
         );
         const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
         const date = new Date().toISOString().slice(0, 10);
@@ -1341,9 +1344,9 @@ $('downloadZoom').addEventListener('click', async () => {
           filename: `zoom-network-debug_${date}.json`,
           saveAs: true,
         });
-        setStatus(`🔬 קובץ debug ירד.`);
+        setStatus(`🎬 קובץ debug ירד — שלח אלי לזיהוי MP4 vs HLS.`);
       } catch (e) {
-        setStatus('🔬 שגיאת תלכוד: ' + e.message);
+        setStatus('🎬 שגיאת תלכוד: ' + e.message);
       }
     }
   }
@@ -1638,12 +1641,11 @@ async function captureZoomNetworkDebug(recordings, onProgress) {
     let tab = null;
     try {
       tab = await chrome.tabs.create({ url: rec.url, active: false });
-      // Initial settle — Zoom playback pages are heavy SPAs, give them
-      // time before injecting so we catch the auth+player bootstrap too.
+      // Initial settle — Zoom playback pages are heavy SPAs.
       await new Promise(r => setTimeout(r, 3000));
-      // Install monkey-patches as early as possible (still racy: requests
-      // from the first 3s are missed). Re-running with status='complete'
-      // detection would be cleaner; keeping it simple for v0.
+      // Install a wide monkey-patch in MAIN world. Captures EVERY fetch
+      // and XHR — we want the full picture of how the player loads its
+      // media (MP4 direct vs HLS manifest+segments vs MSE).
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'MAIN',
@@ -1651,23 +1653,37 @@ async function captureZoomNetworkDebug(recordings, onProgress) {
           if (window.__mhMonInstalled) return;
           window.__mhMonInstalled = true;
           window.__mhRequests = [];
-          const looksInteresting = (s) => /vtt|transcript|caption|subtitle|cc\b|webvtt|text|json|xml/i.test(s || '');
+          // Wider net than before — also captures video/audio/mp4/m3u8/ts/octet-stream.
+          const looksInteresting = (s) =>
+            /vtt|transcript|caption|subtitle|cc\b|webvtt|json|xml|video|audio|mp4|m3u8|\.ts\b|mpegurl|octet-stream|file|play|stream|dl|range/i.test(s || '');
           const origFetch = window.fetch;
           window.fetch = async function (...args) {
             const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
             const method = (args[1] && args[1].method) || (args[0] && args[0].method) || 'GET';
+            const reqHeaders = {};
+            try {
+              const h = args[1]?.headers;
+              if (h && typeof h.forEach === 'function') h.forEach((v, k) => { reqHeaders[k] = v; });
+              else if (h && typeof h === 'object') Object.assign(reqHeaders, h);
+            } catch {}
             const startedAt = Date.now();
             try {
               const res = await origFetch.apply(this, args);
               const ct = res.headers.get('content-type') || '';
               const cl = +(res.headers.get('content-length') || 0) || null;
+              const cr = res.headers.get('content-range') || null;
+              const acceptRanges = res.headers.get('accept-ranges') || null;
               let snippet = null;
-              if (looksInteresting(url) || looksInteresting(ct)) {
-                try { snippet = (await res.clone().text()).slice(0, 6000); } catch {}
+              // Only snippet small, text-y responses; never download a video into a snippet.
+              if (looksInteresting(url) || /vtt|json|xml|text|mpegurl/i.test(ct)) {
+                if (!/video|audio|octet-stream|mp4/i.test(ct) && cl !== null && cl < 200000) {
+                  try { snippet = (await res.clone().text()).slice(0, 8000); } catch {}
+                }
               }
               window.__mhRequests.push({
-                via: 'fetch', method, url,
+                via: 'fetch', method, url, reqHeaders,
                 status: res.status, contentType: ct, contentLength: cl,
+                contentRange: cr, acceptRanges,
                 snippet, durationMs: Date.now() - startedAt,
               });
               return res;
@@ -1682,64 +1698,176 @@ async function captureZoomNetworkDebug(recordings, onProgress) {
           const origOpen = XMLHttpRequest.prototype.open;
           const origSend = XMLHttpRequest.prototype.send;
           XMLHttpRequest.prototype.open = function (method, url) {
-            this.__mhM = method; this.__mhU = url;
+            this.__mhM = method; this.__mhU = url; this.__mhReqHdrs = {};
             return origOpen.apply(this, arguments);
+          };
+          const origSetHdr = XMLHttpRequest.prototype.setRequestHeader;
+          XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+            try { this.__mhReqHdrs[k.toLowerCase()] = v; } catch {}
+            return origSetHdr.apply(this, arguments);
           };
           XMLHttpRequest.prototype.send = function () {
             const startedAt = Date.now();
             const url = this.__mhU || '';
             this.addEventListener('loadend', () => {
               const ct = (this.getResponseHeader && this.getResponseHeader('content-type')) || '';
+              const cl = +(this.getResponseHeader && this.getResponseHeader('content-length')) || null;
+              const cr = (this.getResponseHeader && this.getResponseHeader('content-range')) || null;
+              const acceptRanges = (this.getResponseHeader && this.getResponseHeader('accept-ranges')) || null;
               let snippet = null;
               try {
-                if ((looksInteresting(url) || looksInteresting(ct))
+                if ((looksInteresting(url) || /vtt|json|xml|text|mpegurl/i.test(ct))
+                    && !/video|audio|octet-stream|mp4/i.test(ct)
                     && (this.responseType === '' || this.responseType === 'text')) {
-                  snippet = (this.responseText || '').slice(0, 6000);
+                  snippet = (this.responseText || '').slice(0, 8000);
                 }
               } catch {}
               window.__mhRequests.push({
-                via: 'xhr', method: this.__mhM, url,
-                status: this.status, contentType: ct,
-                contentLength: +(this.getResponseHeader && this.getResponseHeader('content-length')) || null,
+                via: 'xhr', method: this.__mhM, url, reqHeaders: this.__mhReqHdrs,
+                status: this.status, contentType: ct, contentLength: cl,
+                contentRange: cr, acceptRanges,
                 snippet, durationMs: Date.now() - startedAt,
               });
             });
             return origSend.apply(this, arguments);
           };
+          // Capture MediaSource activity (HLS / DASH frequently use MSE).
+          // We log every appendBuffer call's size + the source URL.
+          window.__mhMseActivity = [];
+          const origAddSourceBuffer = window.MediaSource?.prototype?.addSourceBuffer;
+          if (origAddSourceBuffer) {
+            window.MediaSource.prototype.addSourceBuffer = function (mime) {
+              window.__mhMseActivity.push({ event: 'addSourceBuffer', mime, at: Date.now() });
+              const sb = origAddSourceBuffer.apply(this, arguments);
+              const origAppend = sb.appendBuffer;
+              sb.appendBuffer = function (buf) {
+                window.__mhMseActivity.push({
+                  event: 'appendBuffer', mime,
+                  byteLength: buf?.byteLength ?? null,
+                  at: Date.now(),
+                });
+                return origAppend.apply(this, arguments);
+              };
+              return sb;
+            };
+          }
+          // Track <video> elements' .src attribute changes — sometimes the
+          // player just sets a blob URL or a direct MP4.
+          const obs = new MutationObserver(() => {
+            for (const v of document.querySelectorAll('video, audio')) {
+              const src = v.currentSrc || v.src;
+              if (src && !window.__mhMediaSrcs?.includes(src)) {
+                (window.__mhMediaSrcs ||= []).push(src);
+              }
+            }
+          });
+          obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
         },
       });
-      // Let the player run and (hopefully) request the transcript.
-      await new Promise(r => setTimeout(r, 15000));
-      // Snapshot the captured requests.
+      // Try to click "Play" so the player actually starts streaming the
+      // video. Without this, we only see the initial bootstrap requests.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => {
+          const candidates = [
+            '.play-control',
+            '.zm-control-button-play',
+            'button.play-button',
+            '[aria-label="Play" i]',
+            '[aria-label="הפעל" i]',
+            '[title="Play" i]',
+            'button[data-tracking-id*="play" i]',
+            '.center-play-btn',
+            '.vjs-play-control',
+            // Generic SVG play icon containers
+            'div[role="button"][aria-label*="play" i]',
+          ];
+          for (const sel of candidates) {
+            const el = document.querySelector(sel);
+            if (el && !el.disabled) {
+              try { el.click(); window.__mhPlayClicked = sel; return; } catch {}
+            }
+          }
+          // Last resort: any visible button with text "Play"
+          for (const b of document.querySelectorAll('button')) {
+            const t = (b.textContent || '').trim().toLowerCase();
+            if (t === 'play' || t === 'הפעל') {
+              try { b.click(); window.__mhPlayClicked = `text:${t}`; return; } catch {}
+            }
+          }
+        },
+      });
+      // Let the player actually stream for 20 seconds — long enough to
+      // see MP4 byte-range chunks or several HLS segments fly by.
+      await new Promise(r => setTimeout(r, 20000));
+      // Snapshot.
       const [{ result: reqs }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'MAIN',
         func: () => (window.__mhRequests || []),
       });
-      // Also grab the final DOM HTML — sometimes the transcript text is
-      // embedded directly in the page rather than fetched separately.
-      const [{ result: docInfo }] = await chrome.scripting.executeScript({
+      const [{ result: extras }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'MAIN',
         func: () => ({
           finalUrl: location.href,
           title: document.title,
-          // Snippet to spot hardcoded transcript panels
-          bodySnippet: document.body.innerText.slice(0, 4000),
-          // Common transcript container selectors
+          playClicked: window.__mhPlayClicked || null,
+          mseActivity: window.__mhMseActivity || [],
+          mediaElementSrcs: window.__mhMediaSrcs || [],
+          // Snippet
+          bodySnippet: (document.body?.innerText || '').slice(0, 2000),
           hasTranscriptPanel: !!document.querySelector(
             '[class*="transcript" i], [id*="transcript" i], [data-test*="transcript" i]'
           ),
+          // Look for video tags in case MSE is in use
+          videoCount: document.querySelectorAll('video').length,
+          audioCount: document.querySelectorAll('audio').length,
         }),
       });
+      // Classify the requests so the JSON is easier to read.
+      const videoCandidates = [];
+      const hlsManifests = [];
+      const hlsSegments = [];
+      const transcriptCandidates = [];
+      const apiCalls = [];
+      for (const r of reqs) {
+        const u = r.url || '';
+        const ct = r.contentType || '';
+        if (/\.m3u8(\?|#|$)/i.test(u) || /mpegurl/i.test(ct)) {
+          hlsManifests.push(r);
+        } else if (/\.ts(\?|#|$)/i.test(u) || /video\/mp2t/i.test(ct)) {
+          hlsSegments.push(r);
+        } else if (/\.mp4|video\/mp4|octet-stream/i.test(u + ' ' + ct) && (r.contentLength ?? 0) > 1024 * 100) {
+          videoCandidates.push(r);
+        } else if (/vtt|webvtt|transcript|caption/i.test(u + ' ' + ct)) {
+          transcriptCandidates.push(r);
+        } else if (r.status === 200 && /json/i.test(ct)) {
+          apiCalls.push({ url: r.url, contentType: ct, snippetPrefix: (r.snippet || '').slice(0, 200) });
+        }
+      }
       results.push({
         recording: { topic: rec.topic, date: rec.date, url: rec.url },
-        finalPageUrl: docInfo.finalUrl,
-        pageTitle: docInfo.title,
-        hasTranscriptPanel: docInfo.hasTranscriptPanel,
-        bodySnippet: docInfo.bodySnippet,
+        finalPageUrl: extras.finalUrl,
+        pageTitle: extras.title,
+        playClicked: extras.playClicked,
+        videoElementCount: extras.videoCount,
+        audioElementCount: extras.audioCount,
+        mediaElementSrcs: extras.mediaElementSrcs,
+        mseActivity: extras.mseActivity,
+        hasTranscriptPanel: extras.hasTranscriptPanel,
+        bodySnippet: extras.bodySnippet,
         requestCount: reqs.length,
-        requests: reqs,
+        // Pre-classified buckets — these are what I'll look at first.
+        classification: {
+          videoCandidates,
+          hlsManifests,
+          hlsSegments,
+          transcriptCandidates,
+          apiCallsSample: apiCalls.slice(0, 20),
+        },
+        allRequests: reqs,
       });
     } catch (e) {
       results.push({
@@ -1753,12 +1881,12 @@ async function captureZoomNetworkDebug(recordings, onProgress) {
     }
   }
   return {
-    schema: 'moodle-hoarder.zoom-debug.v1',
+    schema: 'moodle-hoarder.zoom-debug.v2',
     generator: 'Moodle Hoarder',
     generatorVersion: chrome.runtime.getManifest?.()?.version || null,
     capturedAt: new Date().toISOString(),
     count: results.length,
-    note: 'Inspect for VTT/transcript request URL patterns. May contain JWT tokens — handle accordingly.',
+    note: 'Phase 0 capture for RECORDING DOWNLOAD investigation. Look at classification.videoCandidates and classification.hlsManifests first — those answer "is this MP4 direct or HLS?". mseActivity tells whether MediaSource is in play (likely HLS/DASH). mediaElementSrcs catches blob URLs / direct MP4 URLs set on <video>. May contain JWT tokens — handle accordingly.',
     results,
   };
 }
