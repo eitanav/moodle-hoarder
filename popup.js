@@ -1376,6 +1376,302 @@ $('downloadZoomVideos').addEventListener('click', async () => {
   }
 });
 
+// ========== Zoom diagnostic ==========
+// A self-contained, step-by-step tracer for the whole video pipeline.
+// Unlike captureZoomNetworkDebug (which only runs AFTER resolve succeeds),
+// this runs regardless of success and snapshots the DOM at every stage,
+// so we can see exactly WHERE the flow breaks even when nothing downloads.
+// It calls the existing resolver helpers read-only (golden rule #1: never
+// modify them) and records what they return.
+
+// Rich per-frame snapshot of whatever page the tab is currently showing.
+// Captured at each stage so we can compare list vs. detail vs. player.
+async function inspectZoomFrames(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const clip = (s, n = 200) => (s || '').toString().replace(/\s+/g, ' ').trim().slice(0, n);
+        const ZOOM_ID_RE = /\b\d{3,4}\s+\d{3,4}\s+\d{3,4}\b/;
+        // Tables (the resolver clicks rows inside a table that has a zoom id).
+        const tables = [...document.querySelectorAll('table')].map(tbl => {
+          const rows = [...tbl.querySelectorAll('tbody tr')];
+          return {
+            rowCount: rows.length,
+            hasZoomId: rows.some(r => ZOOM_ID_RE.test(r.textContent || '')),
+            headerText: clip(tbl.querySelector('thead')?.textContent || '', 300),
+            firstRowText: clip(rows[0]?.textContent || '', 300),
+            firstRowHasLink: !!rows[0]?.querySelector('a[href]:not([href="#"]):not([href^="javascript"])'),
+            firstRowHasButton: !!rows[0]?.querySelector('button:not([disabled]), [role="button"]'),
+          };
+        });
+        // Play-button-like elements (the detail page click target).
+        const playLike = [];
+        const seen = new Set();
+        for (const el of document.querySelectorAll('button, [role="button"], a, [class*="play" i], [aria-label*="play" i], [title*="play" i]')) {
+          if (seen.has(el)) continue; seen.add(el);
+          const cls = (el.className && el.className.toString) ? el.className.toString() : '';
+          const al = el.getAttribute?.('aria-label') || '';
+          const ti = el.getAttribute?.('title') || '';
+          const tx = clip(el.textContent, 40);
+          if (/play/i.test(cls + ' ' + al + ' ' + ti + ' ' + tx) || /הפעל/.test(al + ' ' + ti + ' ' + tx)) {
+            playLike.push({ tag: el.tagName, class: clip(cls, 140), ariaLabel: al, title: ti, text: tx, visible: el.offsetParent !== null });
+          }
+        }
+        // Known selectors the resolver depends on — does each match right now?
+        const sel = (s) => document.querySelectorAll(s).length;
+        const knownSelectors = {
+          '.lti-recording-item-play-media': sel('.lti-recording-item-play-media'),
+          '[class*="play-media"]': sel('[class*="play-media"]'),
+          '[title="Play"]': sel('[title="Play"]'),
+          '.play-control': sel('.play-control'),
+          '.ant-pagination': sel('.ant-pagination'),
+          '.ant-breadcrumb': sel('.ant-breadcrumb'),
+          'video': sel('video'),
+          'source': sel('source'),
+        };
+        // Zoom recording URLs visible anywhere in the DOM.
+        const recUrls = new Set();
+        for (const a of document.querySelectorAll('a[href]')) {
+          if (/zoom\.us\/(?:rec|recording)\//.test(a.href)) recUrls.add(a.href);
+        }
+        const bodyText = (document.body?.innerText || '');
+        return {
+          frameUrl: location.href,
+          title: document.title,
+          isZoom: /zoom\.us/.test(location.href),
+          bodyChars: bodyText.length,
+          looksLikeLogin: /sign in|log ?in|signin|התחבר|נא להתחבר/i.test(bodyText.slice(0, 4000)),
+          tableCount: tables.length,
+          tables,
+          ariaRowCount: document.querySelectorAll('[role="row"]').length,
+          knownSelectors,
+          playLikeCount: playLike.length,
+          playLike: playLike.slice(0, 15),
+          recUrlsOnPage: [...recUrls].slice(0, 10),
+          pagination: {
+            present: !!document.querySelector('.ant-pagination'),
+            active: clip(document.querySelector('.ant-pagination-item-active')?.textContent || '', 10),
+            nextDisabled: !!document.querySelector('.ant-pagination-next.ant-pagination-disabled'),
+          },
+          bodySnippet: clip(bodyText, 1500),
+        };
+      },
+    });
+    return results.map(r => r?.result).filter(Boolean);
+  } catch (e) {
+    return [{ error: String(e) }];
+  }
+}
+
+// Phase B probe: open a share/play URL in a hidden tab, install an
+// UNFILTERED network monitor (captures every URL the player touches, not
+// just ssrweb .mp4 like the real extractor), click play, and collect what
+// the player actually loads — so we can see whether a signed MP4 ever
+// appears and, if not, what it uses instead (HLS, blob, MSE, nothing).
+async function probePlayerNetwork(shareUrl, onProgress) {
+  let tab = null;
+  const SETTLE = 3500, HARD = 25000;
+  try {
+    tab = await chrome.tabs.create({ url: shareUrl, active: false });
+    await new Promise(r => setTimeout(r, SETTLE));
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: 'MAIN',
+      func: () => {
+        if (window.__mhDiagNet) return;
+        window.__mhDiagNet = true;
+        window.__mhDiagUrls = [];
+        const rem = (s, via) => {
+          if (!s || typeof s !== 'string') return;
+          if (s.startsWith('data:')) return;
+          window.__mhDiagUrls.push({ via, url: s.slice(0, 600), blob: s.startsWith('blob:') });
+        };
+        const scan = () => { for (const v of document.querySelectorAll('video, source')) rem(v.currentSrc || v.src || v.getAttribute('src'), 'media-src'); };
+        new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+        scan();
+        const of = window.fetch;
+        window.fetch = function (...a) { rem(typeof a[0] === 'string' ? a[0] : (a[0]?.url || ''), 'fetch'); return of.apply(this, a); };
+        const oo = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (m, u) { rem(u, 'xhr'); return oo.apply(this, arguments); };
+      },
+    });
+    // Try to click play (same selector set as the real extractor).
+    const [{ result: playResult }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: 'MAIN',
+      func: () => {
+        const candidates = [
+          '.play-control', '.zm-control-button-play', 'button.play-button',
+          '[aria-label="Play" i]', '[aria-label="הפעל" i]', '[title="Play" i]',
+          'button[data-tracking-id*="play" i]', '.center-play-btn',
+          '.vjs-play-control', 'div[role="button"][aria-label*="play" i]',
+          '.lti-recording-item-play-media', '[class*="play-media"]',
+        ];
+        for (const s of candidates) {
+          const el = document.querySelector(s);
+          if (el && !el.disabled) { try { el.click(); return { clicked: true, selector: s }; } catch {} }
+        }
+        for (const b of document.querySelectorAll('button')) {
+          const tx = (b.textContent || '').trim().toLowerCase();
+          if (tx === 'play' || tx === 'הפעל') { try { b.click(); return { clicked: true, selector: 'button:text=play' }; } catch {} }
+        }
+        return { clicked: false, selector: null };
+      },
+    });
+    // Poll for captured URLs.
+    const start = Date.now();
+    let urls = [];
+    while (Date.now() - start < HARD) {
+      await new Promise(r => setTimeout(r, 800));
+      try {
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, world: 'MAIN',
+          func: () => window.__mhDiagUrls || [],
+        });
+        urls = result || [];
+      } catch {}
+      onProgress?.(urls.length, Math.round((Date.now() - start) / 1000));
+      if (urls.length > 0 && Date.now() - start > SETTLE + 6000) break;
+    }
+    // Dedupe + classify.
+    const seen = new Set();
+    const uniq = [];
+    for (const u of urls) { const k = u.url; if (!seen.has(k)) { seen.add(k); uniq.push(u); } }
+    const classify = {
+      signedMp4: uniq.filter(u => /ssrweb\.zoom\.us/i.test(u.url) && /\.mp4/i.test(u.url) && !u.blob),
+      anyMp4: uniq.filter(u => /\.mp4/i.test(u.url)),
+      hls: uniq.filter(u => /\.m3u8/i.test(u.url)),
+      blobSources: uniq.filter(u => u.blob),
+      ssrweb: uniq.filter(u => /ssrweb\.zoom\.us/i.test(u.url)),
+    };
+    return { playResult, urlCount: uniq.length, classification: classify, allUrls: uniq.slice(0, 120) };
+  } catch (e) {
+    return { error: String(e) };
+  } finally {
+    if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch {} }
+  }
+}
+
+// Orchestrator: walks list → detail → share URL → player network, tracing
+// each step. Operates on the FIRST row of whatever list page is showing.
+async function runZoomVideoDiagnostic(tabId, onProgress) {
+  const t0 = Date.now();
+  const trace = {
+    schema: 'moodle-hoarder.zoom-diagnostic.v2',
+    version: (chrome.runtime.getManifest?.().version) || '?',
+    startedAt: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    steps: [],
+    summary: {},
+  };
+  const step = (name, data) => { trace.steps.push({ name, atMs: Date.now() - t0, ...data }); return data; };
+
+  // Step 1 — list page as it stands now.
+  onProgress?.('1/6 צילום דף הרשימה...');
+  const listFrames = await inspectZoomFrames(tabId);
+  step('list-page', { frames: listFrames });
+  const listFrame = listFrames.find(f => f.tableCount > 0 && f.tables.some(t => t.hasZoomId))
+                 || listFrames.find(f => f.isZoom) || listFrames[0] || {};
+  trace.summary.foundRecordingsTable = !!(listFrame.tables && listFrame.tables.some(t => t.hasZoomId));
+  trace.summary.frameCount = listFrames.length;
+  if (listFrames.some(f => f.looksLikeLogin)) trace.summary.warnLogin = 'דף נראה כמו מסך התחברות — ייתכן שאינך מחובר ל-Zoom.';
+
+  // Step 2 — click first row (real resolver helper).
+  onProgress?.('2/6 לחיצה על השורה הראשונה...');
+  const clicked = await clickRecordingRow(tabId, 0);
+  step('click-row', { rowIndex: 0, clicked });
+  trace.summary.rowClickWorked = clicked;
+
+  // Step 3 — detail page.
+  onProgress?.('3/6 המתנה לדף הפרטים...');
+  const detail = await waitForDetailPage(tabId, 9000);
+  await new Promise(r => setTimeout(r, 600));
+  const detailFrames = await inspectZoomFrames(tabId);
+  step('detail-page', { detailUrl: detail.url, urlsOnDetail: detail.urls, frames: detailFrames });
+  trace.summary.detailPlayButtonFound = detailFrames.some(f =>
+    f.knownSelectors && (f.knownSelectors['.lti-recording-item-play-media'] || f.knownSelectors['[class*="play-media"]'] || f.knownSelectors['[title="Play"]']));
+
+  // Step 4 — click play & capture share URL (real resolver helper).
+  onProgress?.('4/6 לחיצה על Play וחילוץ קישור share...');
+  let shareUrls = detail.urls || [];
+  let capturedFromPlay = [];
+  if (!shareUrls.length) {
+    capturedFromPlay = await clickPlayAndCaptureUrl(tabId);
+    if (capturedFromPlay.length) shareUrls = capturedFromPlay;
+  }
+  step('capture-share-url', { fromDetailScrape: detail.urls || [], fromPlayClick: capturedFromPlay, resolved: shareUrls });
+  trace.summary.shareUrlResolved = shareUrls.length > 0;
+  trace.summary.shareUrlSample = shareUrls[0] || null;
+
+  // Step 5 — go back so the list is restored.
+  onProgress?.('5/6 חזרה לרשימה...');
+  await navigateBackInZoom(tabId);
+  await waitForListPage(tabId, 6000).catch(() => {});
+
+  // Step 6 — probe the player network on the resolved share URL.
+  if (shareUrls.length) {
+    onProgress?.('6/6 בדיקת רשת של הנגן (פותח טאב נסתר, ~25 שניות)...');
+    const probe = await probePlayerNetwork(shareUrls[0], (n, secs) => onProgress?.(`6/6 בדיקת נגן — נתפסו ${n} כתובות (${secs} שניות)`));
+    step('player-network-probe', probe);
+    trace.summary.signedMp4Found = !!(probe.classification && probe.classification.signedMp4 && probe.classification.signedMp4.length);
+    trace.summary.playerUsesHls = !!(probe.classification && probe.classification.hls && probe.classification.hls.length);
+  } else {
+    step('player-network-probe', { skipped: 'no share URL to probe' });
+    trace.summary.signedMp4Found = false;
+  }
+
+  // Verdict — a plain-language diagnosis at the top of the file.
+  const s = trace.summary;
+  let verdict;
+  if (!s.foundRecordingsTable) {
+    verdict = s.warnLogin
+      ? 'לא נמצאה טבלת הקלטות, והדף נראה כמו מסך התחברות. ככל הנראה אינך מחובר ל-Zoom, או שצריך לפתוח מחדש את דף ההקלטות.'
+      : 'לא נמצאה טבלת הקלטות בדף הנוכחי. ייתכן שניווטת מדף ההקלטות, או שמבנה ה-DOM של Zoom השתנה (ראה list-page.frames).';
+  } else if (!s.rowClickWorked) {
+    verdict = 'נמצאה טבלה אך לחיצה על השורה נכשלה — ייתכן שמבנה השורה/הקישור השתנה (ראה list-page.frames[].tables).';
+  } else if (!s.detailPlayButtonFound && !s.shareUrlResolved) {
+    verdict = 'נכנסנו לדף הפרטים אך כפתור ה-Play לא זוהה ולא נתפס קישור — סביר ש-class-ים של כפתור ה-Play השתנו (ראה detail-page.frames[].playLike).';
+  } else if (!s.shareUrlResolved) {
+    verdict = 'כפתור Play זוהה אך לחיצה עליו לא חשפה קישור share (window.open לא נתפס). ראה capture-share-url.';
+  } else if (!s.signedMp4Found) {
+    verdict = s.playerUsesHls
+      ? 'הקישור נחלץ, אך הנגן משתמש ב-HLS (m3u8) ולא ב-MP4 ישיר — צריך לוגיקת הורדה אחרת. ראה player-network-probe.classification.'
+      : 'הקישור נחלץ אך לא נתפס signed MP4 מ-ssrweb. ייתכן שהנגן לא נטען בטאב רקע, ה-URL פג, או שהפורמט השתנה. ראה player-network-probe.allUrls.';
+  } else {
+    verdict = 'הכל נראה תקין: טבלה ✓, קליק ✓, דף פרטים ✓, קישור share ✓, signed MP4 ✓. אם ההורדה עדיין נכשלת — ייתכן שה-URL פג (signed URLs פגים תוך ~שעתיים) או בעיית הרשאות בהורדה. נסה לסרוק מחדש ולהוריד מיד.';
+  }
+  trace.summary.verdict = verdict;
+  return trace;
+}
+
+// 🩺 Button: run the full pipeline diagnostic and save a JSON report.
+$('zoomDiagnose').addEventListener('click', async () => {
+  if (!zoomScanned) { setStatus('🩺 קודם סרוק דף הקלטות Zoom.'); return; }
+  const btns = ['downloadZoomLinks', 'downloadZoomVideos', 'backZoom', 'zoomDiagnose'];
+  btns.forEach(id => { const b = $(id); if (b) b.disabled = true; });
+  setStatus('🩺 מריץ דיאגנוסטיקה — אל תסגור את הפופאפ...');
+  let trace;
+  try {
+    trace = await runZoomVideoDiagnostic(zoomScanned.tabId, (s) => setStatus('🩺 ' + s));
+  } catch (e) {
+    trace = { schema: 'moodle-hoarder.zoom-diagnostic.v2', fatalError: String(e), stack: e?.stack || null };
+  }
+  // Always emit to console first — survives even if the popup closes mid-download.
+  const json = JSON.stringify(trace, null, 2);
+  console.log('===== MOODLE HOARDER — ZOOM DIAGNOSTIC =====');
+  console.log('VERDICT:', trace?.summary?.verdict || trace?.fatalError || '(none)');
+  console.log(json);
+  try {
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: `zoom-diagnostic_${stamp}.json`, saveAs: true });
+    setStatus('🩺 ' + (trace?.summary?.verdict || trace?.fatalError || 'הסתיים') + ' — הקובץ ירד (וגם הודפס ל-Console).');
+  } catch (e) {
+    setStatus('🩺 הניתוח הסתיים אך ההורדה נכשלה — העתק את ה-JSON מה-Console (DevTools). ' + e.message);
+  } finally {
+    btns.forEach(id => { const b = $(id); if (b) b.disabled = false; });
+  }
+});
+
 // Build the text body Zoom recording lists use — kept identical to the
 // legacy saveZoomFile output so users who turn extractTranscripts off
 // still see the familiar format.
