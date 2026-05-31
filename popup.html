@@ -478,7 +478,13 @@
     <div class="row-btns" style="margin-top:8px;">
       <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה — למה ההורדה נכשלת?</button>
     </div>
-    <div class="hint" style="margin-top:6px;">🩺 בודק שלב-אחר-שלב את כל הצנרת על ההקלטה הראשונה ומפיק קובץ <code>zoom-diagnostic_*.json</code> + מדפיס ל-Console. <b>השאר את הפופאפ פתוח עד הסוף (~40 שניות).</b></div>
+    <div class="hint" style="margin-top:6px;">🩺 בודק שלב-אחר-שלב את כל הצנרת על ההקלטה הראשונה. <b>השאר את הפופאפ פתוח עד הסוף (~40 שניות).</b> התוצאה תופיע למטה להעתקה (גם אם ההורדה נכשלת).</div>
+    <div id="zoomDiagResult" style="display:none; margin-top:8px;">
+      <div style="display:flex; gap:6px; margin-bottom:4px;">
+        <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+      </div>
+      <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
+    </div>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
