@@ -1655,20 +1655,45 @@ $('zoomDiagnose').addEventListener('click', async () => {
   } catch (e) {
     trace = { schema: 'moodle-hoarder.zoom-diagnostic.v2', fatalError: String(e), stack: e?.stack || null };
   }
-  // Always emit to console first — survives even if the popup closes mid-download.
   const json = JSON.stringify(trace, null, 2);
+  const verdict = trace?.summary?.verdict || trace?.fatalError || 'הסתיים';
+  // 1) Console — survives even if the popup closes.
   console.log('===== MOODLE HOARDER — ZOOM DIAGNOSTIC =====');
-  console.log('VERDICT:', trace?.summary?.verdict || trace?.fatalError || '(none)');
+  console.log('VERDICT:', verdict);
   console.log(json);
+  // 2) Show in the popup itself — the bulletproof path, no download needed.
+  const out = $('zoomDiagOut');
+  const resultBox = $('zoomDiagResult');
+  if (out && resultBox) {
+    out.value = json;
+    resultBox.style.display = 'block';
+    try { out.focus(); out.select(); } catch {}
+  }
+  // 3) Silent download (saveAs:false — a save dialog steals focus and closes
+  //    the popup, which revokes the blob URL and cancels the download; that
+  //    was why nothing downloaded before).
+  let dlOk = false;
   try {
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: `zoom-diagnostic_${stamp}.json`, saveAs: true });
-    setStatus('🩺 ' + (trace?.summary?.verdict || trace?.fatalError || 'הסתיים') + ' — הקובץ ירד (וגם הודפס ל-Console).');
-  } catch (e) {
-    setStatus('🩺 הניתוח הסתיים אך ההורדה נכשלה — העתק את ה-JSON מה-Console (DevTools). ' + e.message);
-  } finally {
-    btns.forEach(id => { const b = $(id); if (b) b.disabled = false; });
+    await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: `zoom-diagnostic_${stamp}.json`, saveAs: false });
+    dlOk = true;
+  } catch {}
+  setStatus('🩺 ' + verdict + (dlOk ? ' — הקובץ ירד לתיקיית ההורדות, וגם מוצג למטה להעתקה.' : ' — מוצג למטה: לחץ "העתק הכל" ושלח לי.'));
+  btns.forEach(id => { const b = $(id); if (b) b.disabled = false; });
+});
+
+// Copy the diagnostic JSON to the clipboard.
+$('zoomDiagCopy')?.addEventListener('click', async () => {
+  const out = $('zoomDiagOut');
+  if (!out) return;
+  try {
+    await navigator.clipboard.writeText(out.value);
+    setStatus('🩺 הועתק ללוח. הדבק לי כאן בצ׳אט.');
+  } catch {
+    out.focus(); out.select();
+    try { document.execCommand('copy'); setStatus('🩺 הועתק ללוח.'); }
+    catch { setStatus('🩺 בחר הכל בתיבה (Ctrl+A) והעתק ידנית (Ctrl+C).'); }
   }
 });
 
