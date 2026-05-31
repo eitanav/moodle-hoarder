@@ -109,14 +109,11 @@ const SETTINGS_DEFAULTS = {
   // Flip to true to re-enable.
   tryMeydaSyllabusDetour: false,
 
-  // Download the actual Zoom recording MP4 files (v1.24). Confirmed via
-  // debug capture that Ariel's Zoom serves recordings as direct signed
-  // MP4 URLs on ssrweb.zoom.us — no HLS, no DRM. The signed URL works
-  // standalone (CloudFront signature in the query string), so
-  // chrome.downloads.download streams it straight to disk and keeps
-  // going even if the popup closes. OFF by default: recordings are
-  // 200MB-2GB each, so this is an explicit opt-in.
-  downloadRecordings: false,
+  // Video download (v1.24) is triggered by the dedicated 🎥 button in the
+  // Zoom picker, not a setting — see downloadZoomVideos handler. Quality
+  // preference comes from the #zoomQuality dropdown at click time.
+  // (The old downloadRecordings boolean was removed in v1.25 when the
+  // single combined button split into two.)
 };
 
 // Theme persists to localStorage too so the popup/options HTML can apply

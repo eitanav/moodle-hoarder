@@ -459,10 +459,22 @@
         <span>🎬 תלכוד debug של network (לחקירת הורדת וידאו — איטי, ~25 שניות לכל הקלטה)</span>
       </label>
     </div>
-    <div class="row-btns">
-      <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
-      <button id="downloadZoom" data-i18n="btn.decode.zoom">פענח קישורים והורד</button>
+    <!-- Quality selector for video download. Populated/used by the
+         "הורד סרטונים" button. 'best' = highest resolution available. -->
+    <div class="row" style="display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px;">
+      <span style="color:var(--muted);">איכות וידאו:</span>
+      <select id="zoomQuality" style="flex:1; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); font-size:12px;">
+        <option value="best">הטובה ביותר (ברירת מחדל)</option>
+        <option value="smallest">הקטנה ביותר (חוסך מקום)</option>
+        <option value="ask">שאל אותי לכל הקלטה</option>
+      </select>
     </div>
+    <div class="row-btns" style="flex-wrap:wrap; gap:6px;">
+      <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
+      <button id="downloadZoomLinks" style="flex:1; min-width:130px;">📄 קישורים ותמלילים</button>
+      <button id="downloadZoomVideos" style="flex:1; min-width:130px;">🎥 הורד סרטונים (MP4)</button>
+    </div>
+    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור).</div>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>

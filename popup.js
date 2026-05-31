@@ -118,7 +118,7 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (key === 'd') {
     handled = true;
-    for (const id of ['download', 'downloadMulti', 'downloadZoom', 'exportDeadlines', 'downloadQueue']) {
+    for (const id of ['download', 'downloadMulti', 'downloadZoomLinks', 'exportDeadlines', 'downloadQueue']) {
       const el = document.getElementById(id);
       if (el && el.offsetParent !== null && !el.disabled) { el.click(); break; }
     }
@@ -1169,7 +1169,8 @@ function renderZoomPicker() {
 function updateZoomCount() {
   const n = $('zoomItems').querySelectorAll('input[type=checkbox]:checked').length;
   $('selZoom').textContent = n;
-  $('downloadZoom').disabled = n === 0;
+  $('downloadZoomLinks').disabled = n === 0;
+  $('downloadZoomVideos').disabled = n === 0;
 }
 $('zoomAll').addEventListener('click', () => {
   $('zoomItems').querySelectorAll('li:not([style*="display: none"]) input').forEach(c => c.checked = true);
@@ -1194,151 +1195,166 @@ $('backZoom').addEventListener('click', () => {
   zoomScanned = null;
 });
 
-$('downloadZoom').addEventListener('click', async () => {
-  if (!zoomScanned) return;
-  $('downloadZoom').disabled = true;
-  $('backZoom').disabled = true;
+// Returns the currently-checked recordings in the Zoom picker.
+function zoomGetSelected() {
+  if (!zoomScanned) return [];
   const allRecs = zoomScanned.data.recordings;
   const checkedIds = new Set();
   $('zoomItems').querySelectorAll('li').forEach(li => {
     if (li.querySelector('input').checked) checkedIds.add(li.dataset.id);
   });
-  const selected = allRecs.filter(r =>
+  return allRecs.filter(r =>
     checkedIds.has(`${r.meetingId || ''}|${r.date || ''}|${(r.topic || '').slice(0, 30)}`));
-  if (!selected.length) { $('backZoom').disabled = false; return; }
+}
 
-  setStatus(t('status.zoom.start', { n: selected.length }));
-  const debugHtml = await resolveZoomPlayUrls(zoomScanned.tabId, selected, (s) => setStatus(s));
-
-  // Output file contains only the selected recordings.
-  // When transcripts will be extracted (Phase 1), skip the standalone TXT
-  // download — the same content goes into the ZIP as הקלטות.txt and a
-  // separate file would just clutter Downloads. The check has to look at
-  // the SAME conditions Phase 1 uses (a few lines down).
-  const outData = { ...zoomScanned.data, recordings: selected };
-  const _willExtractTranscripts =
-    (CACHED_SETTINGS?.extractTranscripts !== false) &&
-    selected.some(r => r.shareUrls?.length);
-  if (!_willExtractTranscripts) {
-    await saveZoomFile(outData);
+// Resolves share URLs for the selected recordings (the slow JWT step).
+// Caches on each recording so clicking a second button doesn't re-resolve.
+// Returns { withUrls, ok, debugHtml }.
+async function zoomEnsureResolved(selected) {
+  const alreadyAll = selected.every(r => r.shareUrls?.length || r._resolveAttempted);
+  let debugHtml = null;
+  if (!alreadyAll) {
+    setStatus(t('status.zoom.start', { n: selected.length }));
+    debugHtml = await resolveZoomPlayUrls(zoomScanned.tabId, selected, (s) => setStatus(s));
+    for (const r of selected) r._resolveAttempted = true;
   }
-  const ok = selected.filter(r => r.shareUrls?.length).length;
-  if (ok === 0 && debugHtml) {
-    const date = new Date().toISOString().slice(0, 10);
-    const dumpBlob = new Blob([
-      `<!-- Source URL: ${debugHtml.sourceUrl} -->\n<!-- Captured: ${new Date().toISOString()} -->\n`,
-      debugHtml.html,
-    ], { type: 'text/html;charset=utf-8' });
-    await chrome.downloads.download({
-      url: URL.createObjectURL(dumpBlob),
-      filename: `zoom-detail-debug_${date}.html`,
-      saveAs: false,
-    });
-    setStatus(t('status.zoom.no.urls'));
-  } else {
-    setStatus(t('status.zoom.results', { ok, total: selected.length }));
-  }
-  // Phase 1 — if transcripts are enabled, extract them for every
-  // recording that produced a share URL, then package everything (URL
-  // list + per-recording .vtt and .txt) into a single ZIP. The legacy
-  // text-only file output is kept for users who turned the setting off.
   const withUrls = selected.filter(r => r.shareUrls?.length);
-  const wantTranscripts = (CACHED_SETTINGS?.extractTranscripts !== false) && withUrls.length > 0;
-  const debugChk = document.getElementById('zoomDebugNetwork');
+  return { withUrls, ok: withUrls.length, debugHtml };
+}
 
-  if (wantTranscripts) {
-    const concurrency = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 3));
-    const fmt = CACHED_SETTINGS?.transcriptFormats || 'both';
-    setStatus(`📝 מחלץ תמלילים מ-${withUrls.length} הקלטות (${concurrency} במקביל). הקלטות בלי תמליל ידלגו אחרי 8 שניות.`);
-    let transcripts = [];
-    try {
-      transcripts = await extractZoomTranscripts(
-        withUrls.map(r => ({
-          url: r.shareUrls[0],
-          topic: r.topic,
-          date: r.date,
-          meetingId: r.meetingId,
-        })),
-        (done, total, rec) => setStatus(`📝 (${done}/${total}) ${rec.topic || rec.url}`),
-        concurrency,
-      );
-    } catch (e) {
-      setStatus('📝 שגיאה בחילוץ תמלילים: ' + e.message);
-      transcripts = [];
+// 📄 Button: links + transcripts only (the fast path). Produces the ZIP.
+$('downloadZoomLinks').addEventListener('click', async () => {
+  if (!zoomScanned) return;
+  const selected = zoomGetSelected();
+  if (!selected.length) return;
+  $('downloadZoomLinks').disabled = true;
+  $('downloadZoomVideos').disabled = true;
+  $('backZoom').disabled = true;
+  try {
+    const { withUrls, ok, debugHtml } = await zoomEnsureResolved(selected);
+    const outData = { ...zoomScanned.data, recordings: selected };
+
+    if (ok === 0 && debugHtml) {
+      const date = new Date().toISOString().slice(0, 10);
+      const dumpBlob = new Blob([
+        `<!-- Source URL: ${debugHtml.sourceUrl} -->\n<!-- Captured: ${new Date().toISOString()} -->\n`,
+        debugHtml.html,
+      ], { type: 'text/html;charset=utf-8' });
+      await chrome.downloads.download({
+        url: URL.createObjectURL(dumpBlob),
+        filename: `zoom-detail-debug_${date}.html`,
+        saveAs: false,
+      });
+      setStatus(t('status.zoom.no.urls'));
+    } else {
+      setStatus(t('status.zoom.results', { ok, total: selected.length }));
     }
-    // Build the ZIP. הקלטות.txt mirrors the legacy text file. Each
-    // recording with a transcript contributes .vtt / .txt / both
-    // depending on the user's format preference. _status.txt summarises
-    // what worked, what skipped early, and what timed out.
-    const files = [];
-    files.push({
-      path: 'הקלטות.txt',
-      blob: new Blob(['﻿' + buildZoomRecordingsText(outData)], { type: 'text/plain;charset=utf-8' }),
-    });
-    const summary = [];
-    summary.push('Moodle Hoarder — Zoom Transcripts');
-    summary.push('===================================');
-    summary.push(`Captured at: ${new Date().toISOString()}`);
-    summary.push(`Total recordings: ${transcripts.length}`);
-    summary.push(`With transcript: ${transcripts.filter(t => t.vtt).length}`);
-    summary.push(`No transcript UI: ${transcripts.filter(t => t.skipReason === 'no-transcript-ui').length}`);
-    summary.push(`Timed out: ${transcripts.filter(t => t.skipReason === 'timeout').length}`);
-    summary.push(`Format: ${fmt}`);
-    summary.push(`Concurrency: ${concurrency}`);
-    summary.push('');
-    let okT = 0;
-    for (const tres of transcripts) {
-      const baseName = transcriptFileStem(tres.recording);
-      if (tres.vtt) {
-        if (fmt !== 'txt') {
-          files.push({ path: `${baseName}.vtt`, blob: new Blob([tres.vtt], { type: 'text/vtt;charset=utf-8' }) });
+
+    const wantTranscripts = (CACHED_SETTINGS?.extractTranscripts !== false) && withUrls.length > 0;
+    const debugChk = document.getElementById('zoomDebugNetwork');
+
+    if (wantTranscripts) {
+      const concurrency = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 3));
+      const fmt = CACHED_SETTINGS?.transcriptFormats || 'txt';
+      setStatus(`📝 מחלץ תמלילים מ-${withUrls.length} הקלטות (${concurrency} במקביל). הקלטות בלי תמליל ידלגו אחרי 8 שניות.`);
+      let transcripts = [];
+      try {
+        transcripts = await extractZoomTranscripts(
+          withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId })),
+          (done, total, rec) => setStatus(`📝 (${done}/${total}) ${rec.topic || rec.url}`),
+          concurrency,
+        );
+      } catch (e) {
+        setStatus('📝 שגיאה בחילוץ תמלילים: ' + e.message);
+        transcripts = [];
+      }
+      const files = [];
+      files.push({ path: 'הקלטות.txt', blob: new Blob(['﻿' + buildZoomRecordingsText(outData)], { type: 'text/plain;charset=utf-8' }) });
+      const summary = [];
+      summary.push('Moodle Hoarder — Zoom Transcripts');
+      summary.push('===================================');
+      summary.push(`Captured at: ${new Date().toISOString()}`);
+      summary.push(`Total recordings: ${transcripts.length}`);
+      summary.push(`With transcript: ${transcripts.filter(tt => tt.vtt).length}`);
+      summary.push(`No transcript UI: ${transcripts.filter(tt => tt.skipReason === 'no-transcript-ui').length}`);
+      summary.push(`Timed out: ${transcripts.filter(tt => tt.skipReason === 'timeout').length}`);
+      summary.push(`Format: ${fmt}`);
+      summary.push('');
+      let okT = 0;
+      for (const tres of transcripts) {
+        const baseName = transcriptFileStem(tres.recording);
+        if (tres.vtt) {
+          if (fmt !== 'txt') files.push({ path: `${baseName}.vtt`, blob: new Blob([tres.vtt], { type: 'text/vtt;charset=utf-8' }) });
+          if (fmt !== 'vtt') files.push({ path: `${baseName}.txt`, blob: new Blob(['﻿' + tres.txt], { type: 'text/plain;charset=utf-8' }) });
+          summary.push(`✓ ${baseName}  (VTT ${tres.vtt.length}B, TXT ${tres.txt.length}B)`);
+          okT++;
+        } else {
+          summary.push(`✗ ${baseName}  — ${tres.error || 'unknown'}`);
         }
-        if (fmt !== 'vtt') {
-          files.push({ path: `${baseName}.txt`, blob: new Blob(['﻿' + tres.txt], { type: 'text/plain;charset=utf-8' }) });
-        }
-        summary.push(`✓ ${baseName}  (VTT ${tres.vtt.length}B, TXT ${tres.txt.length}B)`);
-        okT++;
-      } else {
-        summary.push(`✗ ${baseName}  — ${tres.error || 'unknown'}`);
+      }
+      files.push({ path: '_status.txt', blob: new Blob(['﻿' + summary.join('\r\n')], { type: 'text/plain;charset=utf-8' }) });
+      const zipBlob = await buildZip(files);
+      const date = new Date().toISOString().slice(0, 10);
+      const zipName = zoomZipFilename(withUrls, date);
+      await chrome.downloads.download({ url: URL.createObjectURL(zipBlob), filename: zipName, saveAs: !!CACHED_SETTINGS?.saveAs });
+      setStatus(`✅ ${zipName} — ${okT}/${transcripts.length} תמלילים חולצו.`);
+      notify('Moodle Hoarder', `Zoom: ${okT}/${transcripts.length} תמלילים, ${ok} URLs`);
+    } else {
+      // Transcripts off — just save the links text file.
+      await saveZoomFile(outData);
+      notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
+    }
+
+    // Debug capture (only when checkbox ticked).
+    if (debugChk?.checked && withUrls.length) {
+      const debugTargets = withUrls.slice(0, 2);
+      setStatus(`🎬 תלכוד network ל-${debugTargets.length} הקלטות (~25 שניות לכל אחת)...`);
+      try {
+        const debugData = await captureZoomNetworkDebug(
+          debugTargets.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date })),
+          (i, total, rec) => setStatus(`🎬 (${i + 1}/${total}) ${rec.topic || rec.url} — מנגן 20 שניות`),
+        );
+        const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
+        const date = new Date().toISOString().slice(0, 10);
+        await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: `zoom-network-debug_${date}.json`, saveAs: true });
+        setStatus(`🎬 קובץ debug ירד.`);
+      } catch (e) {
+        setStatus('🎬 שגיאת תלכוד: ' + e.message);
       }
     }
-    files.push({ path: '_status.txt', blob: new Blob(['﻿' + summary.join('\r\n')], { type: 'text/plain;charset=utf-8' }) });
-    const zipBlob = await buildZip(files);
-    const date = new Date().toISOString().slice(0, 10);
-    const zipName = zoomZipFilename(withUrls, date);
-    await chrome.downloads.download({
-      url: URL.createObjectURL(zipBlob),
-      filename: zipName,
-      saveAs: !!CACHED_SETTINGS?.saveAs,
-    });
-    setStatus(`✅ ${zipName} — ${okT}/${transcripts.length} תמלילים חולצו.`);
-    notify('Moodle Hoarder', `Zoom: ${okT}/${transcripts.length} תמלילים, ${ok} URLs`);
-  } else {
-    // Legacy text-only download (also runs if all recordings failed URL
-    // extraction — saveZoomFile already happened earlier in this handler).
-    notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
+  } finally {
+    $('downloadZoomLinks').disabled = false;
+    $('downloadZoomVideos').disabled = false;
+    $('backZoom').disabled = false;
   }
+});
 
-  // Recording video download (v1.24). Opt-in. For each recording that
-  // produced a share URL, open it, capture the signed MP4 URL, and hand
-  // it to chrome.downloads — which streams to disk in the browser
-  // process, so closing the popup mid-download is fine.
-  if (CACHED_SETTINGS?.downloadRecordings && withUrls.length > 0) {
+// 🎥 Button: download the actual recording MP4 files.
+$('downloadZoomVideos').addEventListener('click', async () => {
+  if (!zoomScanned) return;
+  const selected = zoomGetSelected();
+  if (!selected.length) return;
+  $('downloadZoomLinks').disabled = true;
+  $('downloadZoomVideos').disabled = true;
+  $('backZoom').disabled = true;
+  try {
+    const { withUrls, ok } = await zoomEnsureResolved(selected);
+    if (withUrls.length === 0) {
+      setStatus('🎥 לא הצלחתי לחלץ קישורי share — אי אפשר להוריד וידאו. נסה שוב או בדוק שאתה מחובר ל-Zoom.');
+      return;
+    }
+    const quality = $('zoomQuality')?.value || 'best';
     const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
     const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-    setStatus(`🎥 מחלץ קישורי וידאו ל-${withUrls.length} הקלטות (${recConc} במקביל)...`);
+    setStatus(`🎥 מחלץ קישורי וידאו ל-${withUrls.length} הקלטות (${recConc} במקביל, איכות: ${quality})...`);
     let recResults = [];
     try {
       recResults = await downloadZoomRecordings(
-        withUrls.map(r => ({
-          url: r.shareUrls[0],
-          topic: r.topic,
-          date: r.date,
-          meetingId: r.meetingId,
-        })),
-        (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מתחיל הורדה`),
+        withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId })),
+        (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומתחיל הורדה`),
         recConc,
         subfolder,
+        quality,
       );
     } catch (e) {
       setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
@@ -1346,43 +1362,18 @@ $('downloadZoom').addEventListener('click', async () => {
     }
     const okR = recResults.filter(r => r.downloadId).length;
     const failR = recResults.length - okR;
-    setStatus(`🎥 ${okR}/${recResults.length} הקלטות החלו לרדת${failR ? ` (${failR} נכשלו)` : ''}. ההורדה ממשיכה ברקע — אפשר לסגור.`);
-    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו החלו לרדת`);
-  }
-
-  // Phase 0 debug capture — still available via the picker checkbox for
-  // re-investigating future Zoom tenant changes. Runs AFTER transcripts
-  // (so the same URLs are reused).
-  if (debugChk?.checked) {
-    if (withUrls.length) {
-      // Cap at 2 recordings — for video debug we just need to see the
-      // request pattern, no need to thrash 5 tabs and tens of seconds.
-      const debugTargets = withUrls.slice(0, 2);
-      setStatus(`🎬 תלכוד network ל-${debugTargets.length} הקלטות (~25 שניות לכל אחת)...`);
-      try {
-        const debugData = await captureZoomNetworkDebug(
-          debugTargets.map(r => ({
-            url: r.shareUrls[0],
-            topic: r.topic,
-            date: r.date,
-          })),
-          (i, total, rec) => setStatus(`🎬 (${i + 1}/${total}) ${rec.topic || rec.url} — מנגן 20 שניות`),
-        );
-        const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
-        const date = new Date().toISOString().slice(0, 10);
-        await chrome.downloads.download({
-          url: URL.createObjectURL(blob),
-          filename: `zoom-network-debug_${date}.json`,
-          saveAs: true,
-        });
-        setStatus(`🎬 קובץ debug ירד — שלח אלי לזיהוי MP4 vs HLS.`);
-      } catch (e) {
-        setStatus('🎬 שגיאת תלכוד: ' + e.message);
-      }
+    if (okR === 0) {
+      const firstErr = recResults.find(r => r.error)?.error || 'סיבה לא ידועה';
+      setStatus(`🎥 אף הקלטה לא ירדה. שגיאה ראשונה: ${firstErr}`);
+    } else {
+      setStatus(`🎥 ${okR}/${recResults.length} הקלטות החלו לרדת${failR ? ` (${failR} נכשלו)` : ''}. ההורדה ממשיכה ברקע — אפשר לסגור את הפופאפ.`);
     }
+    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו החלו לרדת`);
+  } finally {
+    $('downloadZoomLinks').disabled = false;
+    $('downloadZoomVideos').disabled = false;
+    $('backZoom').disabled = false;
   }
-
-  $('backZoom').disabled = false;
 });
 
 // Build the text body Zoom recording lists use — kept identical to the
@@ -1582,18 +1573,63 @@ async function extractOneTranscript(rec) {
 // chrome.downloads.download, which streams to disk in the browser
 // process (survives popup close, no memory pressure).
 //
-// extractRecordingUrl opens the playback page in a hidden tab, clicks
-// Play, and polls the <video> element for its currentSrc / src. Returns
-// the signed MP4 URL or null.
-async function extractRecordingUrl(rec, onStatus) {
+// Parse a resolution score from an ssrweb URL filename like
+// "...Recording_1366x768.mp4" → 1366*768. Returns 0 if not parseable.
+function _resolutionScore(url) {
+  const m = (url || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i);
+  if (m) return (+m[1]) * (+m[2]);
+  return 0;
+}
+function _resolutionLabel(url) {
+  const m = (url || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i);
+  return m ? `${m[1]}x${m[2]}` : 'unknown';
+}
+
+// extractRecordingCandidates opens the playback page in a hidden tab,
+// installs a monitor that records EVERY ssrweb signed MP4 URL (via a
+// MutationObserver on <video> src + a fetch/XHR patch — the proven
+// approach from the debug capture), clicks Play, and polls until at
+// least one signed URL appears. Returns an array of unique signed MP4
+// URLs (may be >1 if the recording has multiple resolutions/views).
+async function extractRecordingCandidates(rec) {
   let tab = null;
   const INITIAL_SETTLE = 3500;
   const HARD_TIMEOUT_MS = 25000;
   try {
     tab = await chrome.tabs.create({ url: rec.url, active: false });
     await new Promise(r => setTimeout(r, INITIAL_SETTLE));
-    // Click Play so the player resolves the signed MP4 and assigns it
-    // to the <video> element. Same selector list as the debug capture.
+    // Install the monitor BEFORE clicking play, so we don't miss the URL.
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => {
+        if (window.__mhRecInstalled) return;
+        window.__mhRecInstalled = true;
+        window.__mhRecUrls = [];
+        const isSigned = (s) => s && /ssrweb\.zoom\.us/i.test(s) && /\.mp4/i.test(s) && !s.startsWith('blob:');
+        const remember = (s) => { if (isSigned(s) && !window.__mhRecUrls.includes(s)) window.__mhRecUrls.push(s); };
+        // 1) MutationObserver on <video>/<source> src (proven in debug)
+        const scan = () => {
+          for (const v of document.querySelectorAll('video, source')) {
+            remember(v.currentSrc || v.src || v.getAttribute('src'));
+          }
+        };
+        const obs = new MutationObserver(scan);
+        obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+        scan();
+        // 2) fetch + XHR patch — catches the signed URL even if the player
+        //    fetches it as a blob source.
+        const of = window.fetch;
+        window.fetch = function (...a) {
+          const u = (typeof a[0] === 'string') ? a[0] : (a[0]?.url || '');
+          remember(u);
+          return of.apply(this, a);
+        };
+        const oo = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (m, u) { remember(u); return oo.apply(this, arguments); };
+      },
+    });
+    // Click Play to trigger the signed URL handshake.
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'MAIN',
@@ -1614,41 +1650,26 @@ async function extractRecordingUrl(rec, onStatus) {
         }
       },
     });
-    // Poll the <video> src. Zoom assigns the signed MP4 URL shortly after
-    // the play handshake.
+    // Poll for captured signed URLs.
     const start = Date.now();
+    let urls = [];
     while (Date.now() - start < HARD_TIMEOUT_MS) {
       await new Promise(r => setTimeout(r, 700));
-      let src = null;
       try {
         const [{ result }] = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           world: 'MAIN',
-          func: () => {
-            for (const v of document.querySelectorAll('video')) {
-              const s = v.currentSrc || v.src;
-              // We want the ssrweb signed MP4, not a blob: URL.
-              if (s && /ssrweb\.zoom\.us|\.mp4/i.test(s) && !s.startsWith('blob:')) return s;
-            }
-            // Fallback: any video src at all (even blob — caller decides)
-            for (const v of document.querySelectorAll('video')) {
-              const s = v.currentSrc || v.src;
-              if (s) return s;
-            }
-            return null;
-          },
+          func: () => window.__mhRecUrls || [],
         });
-        src = result;
+        urls = result || [];
       } catch {}
-      if (src && !src.startsWith('blob:') && /ssrweb\.zoom\.us|\.mp4/i.test(src)) {
-        return src;
-      }
-      // Keep a blob fallback in mind but keep polling for the real URL.
-      if (src && onStatus) onStatus('waiting-for-signed-url');
+      // Give it a moment to collect multiple resolutions, but bail once we
+      // have at least one and 3s have passed (most have a single source).
+      if (urls.length > 0 && Date.now() - start > INITIAL_SETTLE + 4000) break;
     }
-    return null;
+    return urls;
   } catch (e) {
-    return null;
+    return [];
   } finally {
     if (tab?.id) {
       try { await chrome.tabs.remove(tab.id); } catch {}
@@ -1656,10 +1677,22 @@ async function extractRecordingUrl(rec, onStatus) {
   }
 }
 
+// Picks one URL from candidates per the quality preference.
+//   'best'     → highest resolution
+//   'smallest' → lowest resolution
+//   'ask'      → (popup can't prompt mid-flow easily) treated as 'best'
+function pickRecordingUrl(candidates, quality) {
+  if (!candidates || candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const sorted = [...candidates].sort((a, b) => _resolutionScore(b) - _resolutionScore(a));
+  if (quality === 'smallest') return sorted[sorted.length - 1];
+  return sorted[0]; // 'best' and 'ask' default to highest
+}
+
 // Extracts recording URLs for a list of recordings (parallel pool), then
 // hands each to chrome.downloads.download. Returns a summary array of
-// { recording, url?, downloadId?, error? }.
-async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder) {
+// { recording, url?, resolution?, downloadId?, error? }.
+async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality) {
   const out = new Array(recordings.length);
   let nextIdx = 0;
   let doneCount = 0;
@@ -1670,21 +1703,16 @@ async function downloadZoomRecordings(recordings, onProgress, concurrency, subfo
       if (myIdx >= recordings.length) return;
       const rec = recordings[myIdx];
       try {
-        const url = await extractRecordingUrl(rec);
+        const candidates = await extractRecordingCandidates(rec);
+        const url = pickRecordingUrl(candidates, quality);
         if (!url) {
-          out[myIdx] = { recording: rec, error: 'Could not capture video URL (player may not have loaded)' };
-        } else if (url.startsWith('blob:')) {
-          out[myIdx] = { recording: rec, error: 'Only a blob: URL was found — cannot download directly (would need MSE capture)' };
+          out[myIdx] = { recording: rec, error: 'לא נתפס קישור וידאו (הנגן אולי לא נטען או אין הקלטה זמינה)' };
         } else {
-          const stem = transcriptFileStem(rec); // reuse the topic_date naming
+          const stem = transcriptFileStem(rec);
           const fname = `${stem}.mp4`;
           const filename = subfolder ? `${subfolder}/${fname}` : fname;
-          const downloadId = await chrome.downloads.download({
-            url,
-            filename,
-            saveAs: false,
-          });
-          out[myIdx] = { recording: rec, url, downloadId };
+          const downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
+          out[myIdx] = { recording: rec, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length };
         }
       } catch (e) {
         out[myIdx] = { recording: rec, error: String(e) };
