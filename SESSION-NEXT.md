@@ -1,77 +1,97 @@
-# הנדאוף — לסשן הבא
+# 🔄 הנדאוף לצ'אט חדש — Moodle Hoarder
 
-## מצב אחרון (v1.22.2)
+> **קרא אותי קודם.** זה המסמך להמשך ישיר מאיפה שעצרנו. אחרי שתקרא — קרא גם `CHANGELOG.md` (5 גרסאות אחרונות) ו-`ROADMAP-100.md`.
 
-- ✅ תמלילי Zoom — Phase 2 עובד מצוין (parallel, early-skip, formats, smart naming, timestamped TXT)
-- ✅ VTT → TXT converter standalone (כפתור בפופאפ)
-- ✅ URL debug sidecar (`_url-debug.json` נוצר אוטומטית כשפריט url לא יורד)
-- ⏸️ **סילבוס meyda — מושהה.** ראה למטה.
+## איפה אנחנו (v1.25.0, git נקי, הכל בענן)
 
-## הסילבוס: מה הולך עם meyda
+הפרויקט הוא תוסף Chrome (MV3) שאוסף חומר מקורסים במודל אריאל (`moodlearn.ariel.ac.il`) ל-ZIP. הרפו: https://github.com/eitanav/moodle-hoarder. תיקייה מקומית: `C:\Users\USER\Documents\Extensions\moodle-hoarder`.
 
-### הבעיה
+### מה קרה בסשן האחרון (v1.18 → v1.25) — סאגת ה-Zoom + סילבוס
 
-ה-URL של סילבוס הוא `https://meyda.ariel.ac.il/Portals/ex/show-syllabus/<id>`. החל מ-v1.22.0 ניסיתי להתמודד עם זה דרך bg tab + DOM scrape + click automation. שלושה debug captures מהמשתמש חשפו:
+1. **תמלילי Zoom** (v1.18-v1.21) — עובד מצוין. debug capture חשף URL pattern → חילוץ אמיתי → parallel + early-skip + פורמטים + timestamps.
+2. **VTT→TXT converter** (v1.21) — כפתור בפופאפ להמרת VTT ידנית.
+3. **סילבוס meyda** (v1.22) — **מושהה.** meyda שבור server-side (Angular SPA שלא מרנדר תוכן, גם ידנית לא עובד). הקוד מוכן מאחורי `tryMeydaSyllabusDetour: false`.
+4. **הורדת וידאו Zoom** (v1.23-v1.25) — **הפיצ'ר הגדול.** debug capture הוכיח: **MP4 ישיר** עם signed CloudFront URL על ה-`<video>` element (`ssrweb.zoom.us/.../Recording_1366x768.mp4?...Signature=...`). אין HLS, אין DRM, אין MSE.
 
-1. **HTML סטטי ריק** (1397 בתים, רק `<app></app>` + Angular bundles)
-2. **Angular SPA לפעמים מרנדר ולפעמים לא** — בריצה אחת `bodyTextLen: 356` ויש כפתור "הדפס", בריצה אחרת `bodyTextLen: 16` ואין כלום
-3. **meyda עצמו שבור גם ידנית** — המשתמש דיווח שגם בדפדפן רגיל, כשלוחצים "הדפס" באתר meyda, מקבלים "הורדה נכשלה"
+### מצב הורדת הוידאו כרגע (v1.25.0)
 
-### למה זה לא קוד שלי
+- **שני כפתורים** בפיקר Zoom: 📄 קישורים+תמלילים, 🎥 הורד סרטונים
+- **בורר איכות** (best/smallest/ask)
+- `extractRecordingCandidates` — bg tab + monitor (MutationObserver + fetch/XHR patch) + click Play → אוסף signed URLs
+- `pickRecordingUrl` — בוחר לפי איכות
+- `downloadZoomRecordings` — worker pool, `chrome.downloads.download` עם ה-signed URL
+- **chrome.downloads רץ ברמת browser → ההורדה ממשיכה גם אם סוגרים את הפופאפ** (עוקף את #80!)
 
-הקוד עובד נכון: פותח tab, מזריק monitor, מחכה, scrape, מנסה fetch. כל השלבים מתועדים ב-trace. אבל אם meyda לא מגיש את ה-API call לסילבוס — אי אפשר לחלץ דבר שלא נשלח.
+## ⚠️ מה צריך בדיקה דחופה בתחילת הסשן הבא
 
-ב-debug 3 (v1.22.1) ראינו:
-```json
-"all": [
-  "ClientApp/StaticFiles/Languages/he.*.json",   // bundle של תרגומים
-  "https://www.google-analytics.com/g/collect...." // tracking
-],
-"bodyTextLen": 16,
-"buttonCandidates": []
-```
+**המשתמש דיווח שהורדת הוידאו לא עבדה ב-v1.24.** התיקון ב-v1.25 (כפתור ייעודי במקום הגדרה מוסתרת) אמור לפתור, אבל **טרם נבדק על ידי המשתמש.**
 
-האנגולר טען, ביקש תרגומים, דיווח לאנליטיקה — ועצר. אין שום בקשת API לסילבוס.
+שאל את המשתמש: **"בדקת את כפתור 🎥 הורד סרטונים ב-v1.25? המ-MP4 ירד שלם?"**
 
-### מה עשיתי ב-v1.22.2
+אם עדיין לא עובד — האבחון:
+1. בקש מהמשתמש לפתוח DevTools על הפופאפ (קליק ימני על אייקון → בדוק קופץ) → Console
+2. לחיצה על 🎥 → לראות אם יש שגיאות אדומות
+3. ה-status בפופאפ יראה את השגיאה הראשונה (למשל "לא נתפס קישור וידאו")
+4. אם "לא נתפס קישור וידאו" → ה-Play לא נלחץ או ה-`<video>` לא קיבל src תוך 25 שניות. אולי צריך עוד selectors או timeout ארוך יותר. אפשר להוסיף debug capture שמראה מה נתפס.
 
-- ה-detour כבוי בברירת המחדל: `tryMeydaSyllabusDetour: false`
-- הקוד נשאר במקום (`fetchMeydaSyllabus`, `_meydaSnapshot`, `_buildMeydaCandidates`, `_isMeydaCandidateJunk`, `isMeydaSyllabus`) — מוכן להפעלה מחדש
-- סילבוס חוזר להיות link ב-`links.txt` כמו פעם
-- אין יותר 11 שניות המתנה לכל סילבוס
+**טיפ:** ה-signed URL פג תוך ~שעתיים. אם המשתמש סרק לפני הרבה זמן ואז לחץ 🎥 — ייכשל. צריך לסרוק מחדש סמוך ללחיצה.
 
-### מתי להפעיל מחדש
+## בקשות פתוחות מהמשתמש (לא הושלמו)
 
-המשתמש מציע לבדוק:
+1. **בורר איכות אמיתי ('ask')** — כרגע 'ask' מתנהג כמו 'best'. המשתמש רוצה שבאמת ישאל. צריך לאסוף את כל הרזולוציות מראש, ואז dialog/prompt בפופאפ. עדיפות בינונית.
+2. **גרסה 2.0** — המשתמש שאל מתי מוצדק. ראה סעיף למטה.
 
-1. **אם meyda חזר לעבוד ידנית** — הכנס ל-URL של סילבוס בדפדפן רגיל, חכה שייטען, לחץ "הדפס". אם ירד PDF → meyda חזר.
-2. **אם אריאל הודיעו על תקלה** — לחפש email/SMS מ-IT של אריאל על תקלה בפורטל meyda.
-3. **אם נסיון על קורס אחר עובד** — אולי הבעיה ספציפית לקורס "חיישנים" (syllabus id 247298) ולא לכל ה-meyda.
+## על גרסה 2.0 — מה אמרתי למשתמש
 
-כש-meyda חוזר לעבוד — אפשר ל-`getSettings` ב-DevTools של options page ולעדכן `tryMeydaSyllabusDetour: true`, או לבנות לזה toggle ב-UI (5 דקות עבודה).
+2.0 מוצדק כשיש **headline feature שמגדיר מחדש את הכלי**. הורדת וידאו אמיתית **היא** כזו. ההמלצה שלי:
+- כש **(א)** הורדת הוידאו עובדת יציב ונבדקה על קורס שלם, **(ב)** בורר האיכות האמיתי מוכן, **(ג)** ה-UX של ה-Zoom מלוטש —
+- **אז מקפיצים ל-2.0.** זה ככל הנראה עוד 1-2 סשנים.
+- 2.0 ראוי לגם README מעודכן + אולי screenshots + סיכום "מה חדש מאז 1.0".
 
-### אם meyda נשאר שבור לתמיד
+## משימות פתוחות אחרות (ROADMAP)
 
-יש מסלולים חלופיים — אבל כל אחד כרוך בלא-מעט עבודה:
+- **#80 service worker downloads** — ראה MIGRATION-80.md. **כבר פחות דחוף** כי הוידאו עוקף אותו דרך chrome.downloads. עדיין רלוונטי להורדות קורס גדולות.
+- **#21 PDF renaming by title** — L, צריך pdf.js.
+- **סילבוס meyda** — מחכה ש-meyda יחזור לעבוד server-side.
+- **תמלילים בהורדת קורס** — כרגע רק בזרימת Zoom-LTI.
 
-1. **Bypass meyda לגמרי** — לבדוק אם יש endpoint רגיל באריאל שמספק סילבוסים. למשל `moodlearn.ariel.ac.il/local/syllabus/...` או דרך ה-API של Moodle. דורש מחקר על המבנה הפנימי של אריאל.
-2. **Print → blob via window.print monkey-patch** — לתפוס את ה-iframe ש-Chrome מייצר לפני שהוא נשלח להדפסה. הזיהוי קיים (`meydaPrintCalled`), אבל לתפוס את התוכן עצמו דורש עבודה ניכרת.
-3. **Drop כל מה שמ-meyda וביקש מהמשתמש לפתוח ידנית** — הסילבוס יהיה link בלבד, המשתמש פותח בדפדפן בעצמו. זה ההתנהגות הנוכחית עכשיו.
+## כללי זהב (חובה)
 
-## משימות שמחכות
+1. **אל תיגע ב-Zoom resolver** (`resolveZoomPlayUrls`, `waitForDetailPage`, `clickPlayAndCaptureUrl`, `expandTimelineActivities`) — שביר, monkey-patch על window.open.
+2. **כן מותר** לגעת בקוד החדש שלי: `extractRecordingCandidates`, `extractZoomTranscripts`, `fetchMeydaSyllabus`, `downloadZoomRecordings`, `captureZoomNetworkDebug`.
+3. **כל פיצ'ר עם on/off → ב-options.html** (אבל פעולות חד-פעמיות כמו "הורד סרטונים" → כפתור בפופאפ).
+4. **CHANGELOG.md לכל גרסה** — "הבעיה לפני / הפתרון / איך לבחון", בעברית.
+5. **bidi marks בעברית:** `replace(/[‎‏‪-‮⁦-⁩﻿]/g, '')` לפני regex match.
+6. **Windows filenames:** תמיד `sanitizeFilename()`.
+7. **debug-driven:** כשמשהו לא ידוע (URL pattern, DOM structure) — בנה debug capture, בקש מהמשתמש להריץ, אל תנחש. זה עבד פעמיים (תמלילים + וידאו).
+8. **כשהשרת שבור — לא הקוד.** (לקח מ-meyda.)
 
-ראה גם CHANGELOG.md לפרטים מלאים.
+## מבנה קבצים (תזכורת מהירה)
 
-- **#80 service worker downloads** — ראה MIGRATION-80.md. L בגודל. ה-checkpoint הקיים מטפל ב-80% מהבעיה.
-- **#21 PDF renaming by title** — L, צריך pdf.js. נדחה.
-- **שיפור תמלילים אפשרי** — חילוץ תמלילים גם כשמורידים קורס שלם, לא רק מתוך זרימת Zoom-LTI.
+| קובץ | תפקיד |
+|------|--------|
+| `popup.js` (~2900 שורות) | כל הלוגיקה: scan, download, ZIP, ICS, Zoom transcripts+video, meyda |
+| `popup.html` | 5 views: initial/picker/multi/zoom/deadlines + VTT converter |
+| `options.html` + `options.js` | הגדרות |
+| `settings.js` | SETTINGS_DEFAULTS + getSettings |
+| `i18n.js` | he/en dictionary + applyLanguage |
+| `background.js` | context menu + queue badge |
+| `content_dashboard.js` | הסתרת מטלות ב-/my/ |
+| `zip.js` | ZIP writer (store-only, Unicode) |
 
-## כללי זהב לסשן הבא
+## פונקציות מפתח להורדת וידאו (לעיון מהיר)
 
-- אל תיגע בקוד Zoom ה-resolver — שביר ועדין
-- כן אפשר לגעת ב-`extractZoomTranscripts` / `fetchMeydaSyllabus` — קוד חדש שלי
-- כל פיצ'ר חדש עם on/off → ב-options.html, לא בפופאפ
-- CHANGELOG.md לכל גרסה, עם "הבעיה לפני / הפתרון / איך לבחון"
-- שמירת bidirectional marks בעברית: `replace(/[‎‏‪-‮⁦-⁩﻿]/g, '')` לפני regex match
-- Windows filename sanitisation: `sanitizeFilename()` תמיד
-- **כשהשרת שבור — לא הקוד שבור.** אל תנסה לפצח שרת שלא מחזיר דאטה.
+- `extractRecordingCandidates(rec)` — popup.js ~1594. פותח tab, monitor, Play, מחזיר signed URLs.
+- `pickRecordingUrl(candidates, quality)` — popup.js ~1684.
+- `downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality)` — popup.js ~1698.
+- `$('downloadZoomVideos')` handler — popup.js ~1333.
+- `vttToCleanText(vtt)` — popup.js ~1573. (timestamped TXT)
+- `_resolutionScore` / `_resolutionLabel` — popup.js ~1567. (פרסור 1366x768 משם הקובץ)
+
+## להתחיל מהר
+
+1. `git pull`
+2. קרא CHANGELOG.md (v1.25 → v1.18)
+3. **שאל את המשתמש אם כפתור 🎥 עבד** — זה ה-blocker הראשי.
+4. אם עבד → בורר איכות אמיתי, ואז דיון 2.0.
+5. אם לא → debug על extractRecordingCandidates.
