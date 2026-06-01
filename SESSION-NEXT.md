@@ -2,7 +2,24 @@
 
 > **קרא אותי קודם.** זה המסמך להמשך ישיר מאיפה שעצרנו. אחרי שתקרא — קרא גם `CHANGELOG.md` (5 גרסאות אחרונות) ו-`ROADMAP-100.md`.
 
-## איפה אנחנו (v1.26.0, git נקי, הכל בענן)
+## 🎯 פריצת דרך — המנגנון של Zoom פוענח (v1.31.0)
+
+המחקר העמוק (`chrome.debugger` ב-background) תפס את בקשת ה-MP4 האמיתית. **המנגנון:**
+
+1. `/nws/common/2.0/nak?pms=Recording...` → **JWT bearer token**.
+2. `/nws/recording/1.0/play/info/<token>?originDomain=...` עם `Authorization: Bearer <JWT>` → JSON עם **`viewMp4Url`** (S3 presigned URL מלא).
+3. `<video>` מושך מ-`ssrweb.zoom.us` עם `Range: bytes=0-` + **`Referer: https://<account>.zoom.us/`** → 206, video/mp4, ~115MB. MP4 ישיר, בלי HLS/DRM/MSE.
+
+**הבאג שתוקן:** v1.28 שלח `Referer: https://zoom.us/`; ה-CDN דורש את **דומיין החשבון** (`ariel-ac-il.zoom.us`). Referer שגוי → 403 HTML → קובץ `.htm`. עכשיו `ensureZoomReferrerRule(origin)` גוזר את ה-origin מה-share URL.
+
+**מצב:** טרם אומת ע"י המשתמש שההורדה עובדת אחרי התיקון. **שלב ראשון בסשן הבא:** לשאול אם 🎥 מוריד MP4 תקין ב-1.31.0.
+
+**אם Referer לבד לא מספיק** — הדרך החסינה: לחקות את ה-API. ה-background כבר יודע לתפוס תגובות Network עם ה-debugger; לתפוס את תגובת `play/info`, לפרסר `viewMp4Url`, ולהוריד אותו ישירות (עוקף את תפיסת `<video>.src`). ראה `deepZoomResearch` ב-`background.js` כבסיס.
+
+### לקח תפעולי קריטי (בזבז חצי סשן)
+המשתמש טוען את התוסף מתיקייה מקומית. **כל השינויים שלי לא הגיעו אליו** כי (א) עבדתי על ברנץ׳ `claude/keen-volta-9pwtR` ו-main היה מאחור, (ב) ה-pull המקומי שלו נכשל/יצר clone מקונן. **פתרון:** מיזגתי הכל ל-main, והוספתי `update.bat` (דאבל-קליק → `git reset --hard origin/main`). תמיד לדחוף ל-main, ולהזכיר לו `update.bat` + Reload.
+
+## איפה אנחנו (v1.31.0, git נקי, הכל בענן)
 
 הפרויקט הוא תוסף Chrome (MV3) שאוסף חומר מקורסים במודל אריאל (`moodlearn.ariel.ac.il`) ל-ZIP. הרפו: https://github.com/eitanav/moodle-hoarder. תיקייה מקומית: `C:\Users\USER\Documents\Extensions\moodle-hoarder`.
 

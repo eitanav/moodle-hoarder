@@ -1344,8 +1344,12 @@ $('downloadZoomVideos').addEventListener('click', async () => {
       return;
     }
     // Make sure the CDN referer rule is live before any chrome.downloads call,
-    // otherwise ssrweb returns an HTML 403 and we'd save a .htm file.
-    await ensureZoomReferrerRule();
+    // otherwise ssrweb returns an HTML 403 and we'd save a .htm file. The
+    // referer must be the ACCOUNT domain (e.g. ariel-ac-il.zoom.us), derived
+    // from the resolved share URL — not the generic zoom.us.
+    let _refOrigin = 'https://zoom.us';
+    try { _refOrigin = new URL(withUrls[0].shareUrls[0]).origin; } catch {}
+    await ensureZoomReferrerRule(_refOrigin);
     const quality = $('zoomQuality')?.value || 'best';
     const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
     const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -1439,9 +1443,14 @@ $('downloadZoomVideos').addEventListener('click', async () => {
 // declarativeNetRequest rule re-adds the Referer/Origin for ssrweb requests
 // so downloads (and the diagnostic's probe fetch) get the real bytes.
 const ZOOM_REFERER_RULE_ID = 9011;
-let _zoomRefererRuleInstalled = false;
-async function ensureZoomReferrerRule() {
-  if (_zoomRefererRuleInstalled) return true;
+let _zoomRefererCurrent = null;
+// The deep-research network trace proved ssrweb's CDN serves the MP4 only when
+// the request carries Referer of the ACCOUNT domain (e.g. https://ariel-ac-il
+// .zoom.us/), not the generic https://zoom.us/ (that was the v1.28 bug — wrong
+// referer → HTML 403 → .htm file). Derive the origin from the share URL.
+async function ensureZoomReferrerRule(refererOrigin) {
+  const origin = (refererOrigin || 'https://zoom.us').replace(/\/+$/, '');
+  if (_zoomRefererCurrent === origin) return true;
   if (!chrome.declarativeNetRequest?.updateDynamicRules) return false;
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
@@ -1452,8 +1461,8 @@ async function ensureZoomReferrerRule() {
         action: {
           type: 'modifyHeaders',
           requestHeaders: [
-            { header: 'referer', operation: 'set', value: 'https://zoom.us/' },
-            { header: 'origin', operation: 'set', value: 'https://zoom.us' },
+            { header: 'referer', operation: 'set', value: origin + '/' },
+            { header: 'origin', operation: 'set', value: origin },
           ],
         },
         condition: {
@@ -1462,7 +1471,7 @@ async function ensureZoomReferrerRule() {
         },
       }],
     });
-    _zoomRefererRuleInstalled = true;
+    _zoomRefererCurrent = origin;
     return true;
   } catch (e) {
     console.warn('[MH] failed to install Zoom referer rule:', e);
@@ -1728,7 +1737,9 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
       onProgress?.('7/7 בדיקת הורדה בלי Referer...');
       const without = await doFetch();
       onProgress?.('7/7 בדיקת הורדה עם Referer...');
-      const ruleOk = await ensureZoomReferrerRule();
+      let _ro = 'https://zoom.us';
+      try { _ro = new URL(shareUrls[0]).origin; } catch {}
+      const ruleOk = await ensureZoomReferrerRule(_ro);
       const withRef = await doFetch();
       step('download-probe', { url: testUrl.slice(0, 200), refererRuleInstalled: ruleOk, withoutReferer: without, withReferer: withRef });
       trace.summary.downloadServesVideo = !!(withRef.ok && /video|octet-stream|mp4/i.test(withRef.contentType || '') && !withRef.looksHtml);
