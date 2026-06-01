@@ -1823,6 +1823,219 @@ $('zoomDiagCopy')?.addEventListener('click', async () => {
   }
 });
 
+// ========== Deep research (chrome.debugger Network trace) ==========
+// The fetch/XHR monkey-patch approach is blind to the request the <video>
+// element itself makes for the MP4 — which is exactly the request we need
+// to understand. chrome.debugger attaches to the tab and records every
+// network request at the browser level: full request headers (Referer,
+// Cookie, Range...), response status, mime type, response headers, and the
+// body of error responses. This reveals precisely how Ariel/Zoom gate the
+// recording bytes.
+
+function _dbgSend(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params || {}, (res) => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message)); else resolve(res);
+    });
+  });
+}
+function _dbgAttach(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, '1.3', () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message)); else resolve();
+    });
+  });
+}
+function _dbgDetach(tabId) {
+  return new Promise((resolve) => { try { chrome.debugger.detach({ tabId }, () => { void chrome.runtime.lastError; resolve(); }); } catch { resolve(); } });
+}
+
+// Trim noisy headers but KEEP the ones that matter for media gating.
+function _pickHeaders(h) {
+  if (!h) return {};
+  const keep = ['referer', 'origin', 'cookie', 'range', 'authorization', 'user-agent', 'host', 'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site', 'accept', 'content-type', 'content-length', 'content-range', 'content-disposition', 'location', 'access-control-allow-origin', 'cache-control', 'server', 'cf-ray', 'x-amz-cf-id', 'set-cookie'];
+  const out = {};
+  for (const k of Object.keys(h)) {
+    const lk = k.toLowerCase();
+    if (keep.includes(lk)) {
+      // Redact cookie values but keep presence + which cookies.
+      if (lk === 'cookie') out[lk] = h[k].split(';').map(c => c.split('=')[0].trim()).join('; ') + '  [values redacted]';
+      else if (lk === 'set-cookie') out[lk] = '[present, redacted]';
+      else out[lk] = h[k];
+    }
+  }
+  return out;
+}
+
+async function deepZoomResearch(shareUrl, onProgress) {
+  const t0 = Date.now();
+  const report = {
+    schema: 'moodle-hoarder.zoom-deep-research.v1',
+    version: chrome.runtime.getManifest?.().version || '?',
+    startedAt: new Date().toISOString(),
+    shareUrl,
+    requests: [],
+    summary: {},
+  };
+  const byId = {};
+  let tabId = null;
+  const onEvent = (source, method, params) => {
+    if (!tabId || source.tabId !== tabId) return;
+    try {
+      if (method === 'Network.requestWillBeSent') {
+        byId[params.requestId] = byId[params.requestId] || {};
+        const r = byId[params.requestId];
+        r.url = params.request.url;
+        r.method = params.request.method;
+        r.requestHeaders = _pickHeaders(params.request.headers);
+        r.resourceType = params.type;
+        if (params.redirectResponse) r.redirectFrom = { status: params.redirectResponse.status, location: params.redirectResponse.headers?.location };
+      } else if (method === 'Network.responseReceived') {
+        const r = byId[params.requestId] = byId[params.requestId] || {};
+        r.status = params.response.status;
+        r.statusText = params.response.statusText;
+        r.mimeType = params.response.mimeType;
+        r.responseHeaders = _pickHeaders(params.response.headers);
+        r.remoteIP = params.response.remoteIPAddress;
+        r.fromCache = params.response.fromDiskCache;
+      } else if (method === 'Network.loadingFinished') {
+        const r = byId[params.requestId]; if (r) r.bytes = params.encodedDataLength;
+      } else if (method === 'Network.loadingFailed') {
+        const r = byId[params.requestId] = byId[params.requestId] || {};
+        r.failed = params.errorText; r.blockedReason = params.blockedReason;
+      }
+    } catch {}
+  };
+  try {
+    const tab = await chrome.tabs.create({ url: shareUrl, active: true });
+    tabId = tab.id;
+    report.openedTabUrl = shareUrl;
+    await new Promise(r => setTimeout(r, 1200));
+    onProgress?.('מתחבר ל-debugger...');
+    await _dbgAttach(tabId);
+    chrome.debugger.onEvent.addListener(onEvent);
+    await _dbgSend(tabId, 'Network.enable');
+    await _dbgSend(tabId, 'Page.enable').catch(() => {});
+    // Let the player mount, then click play.
+    await new Promise(r => setTimeout(r, 3500));
+    onProgress?.('לוחץ Play ומקליט רשת...');
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId }, world: 'MAIN',
+        func: () => {
+          const sels = ['.play-control', '.zm-control-button-play', 'button.play-button', '[aria-label="Play" i]', '[aria-label="הפעל" i]', '[title="Play" i]', '.center-play-btn', '.vjs-play-control', '.lti-recording-item-play-media', '[class*="play-media"]', 'div[role="button"][aria-label*="play" i]'];
+          for (const s of sels) { const el = document.querySelector(s); if (el && !el.disabled) { try { el.click(); return s; } catch {} } }
+          for (const b of document.querySelectorAll('button')) { const tx = (b.textContent || '').trim().toLowerCase(); if (tx === 'play' || tx === 'הפעל') { try { b.click(); return 'btn-text'; } catch {} } }
+          // Also try to start any <video> directly.
+          for (const v of document.querySelectorAll('video')) { try { v.play?.(); } catch {} }
+          return null;
+        },
+      });
+    } catch {}
+    // Record for ~22s so segments / the MP4 request appear.
+    const CAP = 22000;
+    const start = Date.now();
+    while (Date.now() - start < CAP) {
+      await new Promise(r => setTimeout(r, 1500));
+      const n = Object.keys(byId).length;
+      onProgress?.(`מקליט... ${n} בקשות (${Math.round((Date.now() - start) / 1000)}/${CAP / 1000} שניות)`);
+    }
+    // Snapshot the final player state.
+    try {
+      const [{ result: pageState }] = await chrome.scripting.executeScript({
+        target: { tabId }, world: 'MAIN',
+        func: () => ({
+          finalUrl: location.href,
+          title: document.title,
+          videos: [...document.querySelectorAll('video')].map(v => ({ src: v.currentSrc || v.src || v.getAttribute('src') || '', readyState: v.readyState, error: v.error?.code || null, duration: v.duration })),
+          sources: [...document.querySelectorAll('source')].map(s => s.src || s.getAttribute('src') || ''),
+        }),
+      });
+      report.pageState = pageState;
+    } catch (e) { report.pageState = { error: String(e) }; }
+    // Fetch response bodies for the interesting requests: ssrweb, mp4, m3u8,
+    // and any error/html response. Skip large media bodies.
+    const interesting = Object.entries(byId).filter(([, r]) =>
+      /ssrweb\.zoom\.us|\.mp4|\.m3u8|\/rec\/|nws\.zoom/i.test(r.url || '') || (r.status && r.status >= 400) || /text\/html|json/i.test(r.mimeType || ''));
+    onProgress?.('מושך גופי תגובות חשובים...');
+    for (const [id, r] of interesting) {
+      const isMedia = /video|mpegurl|octet-stream/i.test(r.mimeType || '') || (r.bytes || 0) > 200000;
+      if (isMedia) continue; // don't pull big binaries
+      try {
+        const body = await _dbgSend(tabId, 'Network.getResponseBody', { requestId: id });
+        let txt = body.base64Encoded ? '[base64 binary]' : (body.body || '');
+        r.bodySnippet = txt.slice(0, 800);
+      } catch {}
+    }
+    // Assemble + classify.
+    const all = Object.values(byId);
+    report.requests = all.map(r => ({
+      url: (r.url || '').slice(0, 500), method: r.method, resourceType: r.resourceType,
+      status: r.status, statusText: r.statusText, mimeType: r.mimeType, bytes: r.bytes,
+      failed: r.failed, blockedReason: r.blockedReason, redirectFrom: r.redirectFrom, remoteIP: r.remoteIP,
+      requestHeaders: r.requestHeaders, responseHeaders: r.responseHeaders, bodySnippet: r.bodySnippet,
+    }));
+    const isVid = (r) => /video|octet-stream/i.test(r.mimeType || '') || /\.mp4/i.test(r.url || '');
+    report.summary.totalRequests = all.length;
+    report.summary.mediaRequests = report.requests.filter(isVid);
+    report.summary.ssrwebRequests = report.requests.filter(r => /ssrweb\.zoom\.us/i.test(r.url || ''));
+    report.summary.hlsRequests = report.requests.filter(r => /\.m3u8/i.test(r.url || ''));
+    report.summary.errorRequests = report.requests.filter(r => (r.status && r.status >= 400) || r.failed);
+    const okMedia = report.summary.mediaRequests.find(r => r.status >= 200 && r.status < 300 && (r.bytes || 0) > 100000);
+    report.summary.foundPlayingMediaUrl = okMedia ? okMedia.url : null;
+    report.summary.mediaRequestHeaders = okMedia ? okMedia.requestHeaders : (report.summary.mediaRequests[0]?.requestHeaders || null);
+    report.summary.elapsedMs = Date.now() - t0;
+  } catch (e) {
+    report.fatalError = String(e);
+    report.hint = /Cannot access|Another debugger|already attached|Debugger is not allowed/i.test(String(e))
+      ? 'ודא שאין DevTools פתוח על הטאב, ושנתת את הרשאת ה-debugger (טען מחדש את התוסף).'
+      : undefined;
+  } finally {
+    try { chrome.debugger.onEvent.removeListener(onEvent); } catch {}
+    if (tabId) { await _dbgDetach(tabId); try { await chrome.tabs.remove(tabId); } catch {} }
+  }
+  return report;
+}
+
+// 🔬 Button: deep network research on the first selected recording.
+$('zoomResearch')?.addEventListener('click', async () => {
+  if (!zoomScanned) { setStatus('🔬 קודם סרוק דף הקלטות Zoom.'); return; }
+  if (!chrome.debugger) { setStatus('🔬 הרשאת debugger חסרה — טען מחדש את התוסף ב-chrome://extensions.'); return; }
+  const selected = zoomGetSelected();
+  if (!selected.length) { setStatus('🔬 בחר לפחות הקלטה אחת.'); return; }
+  const btns = ['downloadZoomLinks', 'downloadZoomVideos', 'backZoom', 'zoomDiagnose', 'zoomResearch'];
+  btns.forEach(id => { const b = $(id); if (b) b.disabled = true; });
+  let report;
+  try {
+    setStatus('🔬 מחלץ קישור share להקלטה הראשונה...');
+    const { withUrls } = await zoomEnsureResolved([selected[0]]);
+    if (!withUrls.length) {
+      report = { schema: 'moodle-hoarder.zoom-deep-research.v1', error: 'לא הצלחתי לחלץ קישור share — אי אפשר לחקור. ראה 🩺 דיאגנוסטיקה לשלב הזה.' };
+    } else {
+      report = await deepZoomResearch(withUrls[0].shareUrls[0], (s) => setStatus('🔬 ' + s));
+    }
+  } catch (e) {
+    report = { schema: 'moodle-hoarder.zoom-deep-research.v1', fatalError: String(e), stack: e?.stack || null };
+  }
+  const json = JSON.stringify(report, null, 2);
+  console.log('===== MOODLE HOARDER — ZOOM DEEP RESEARCH =====');
+  console.log(json);
+  const out = $('zoomDiagOut'), box = $('zoomDiagResult');
+  if (out && box) { out.value = json; box.style.display = 'block'; try { out.focus(); out.select(); } catch {} }
+  let dlOk = false;
+  try {
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: `zoom-deep-research_${stamp}.json`, saveAs: false });
+    dlOk = true;
+  } catch {}
+  const found = report?.summary?.foundPlayingMediaUrl;
+  setStatus('🔬 ' + (report?.error || report?.fatalError || (found ? 'נמצאה בקשת וידאו מנגנת — ראה התוצאה למטה' : 'הסתיים — ראה התוצאה למטה')) + (dlOk ? ' (גם ירד קובץ)' : '') + '. לחץ 📋 העתק הכל ושלח לי.');
+  btns.forEach(id => { const b = $(id); if (b) b.disabled = false; });
+});
+
 // Build the text body Zoom recording lists use — kept identical to the
 // legacy saveZoomFile output so users who turn extractTranscripts off
 // still see the familiar format.
