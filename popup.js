@@ -625,6 +625,12 @@ function formatBytes(n) {
   return (n / 1024 / 1024 / 1024).toFixed(2) + 'GB';
 }
 
+// Progress label for a streaming download: "45.2MB / 115.0MB" when the total
+// is known, or just "45.2MB" when the CDN omits Content-Length.
+function zoomBytesLabel(received, total) {
+  return total ? `${formatBytes(received)} / ${formatBytes(total)}` : formatBytes(received);
+}
+
 // HEAD pre-scan only handles types where the size is meaningful and cheap
 // to discover (single file or single folder ZIP). For HTML-wrapped types
 // like assign/page/book, the size is the sum of attached files and we'd
@@ -1393,25 +1399,27 @@ $('downloadZoomVideos').addEventListener('click', async () => {
         }
         picker = (c) => pickRecordingUrlByLabel(c, choice);
       }
-      setStatus(`🎥 מתחיל הורדה...`);
+      setStatus(`🎥 מתחיל הורדה... (אל תסגור את הפופאפ עד שההורדה תיגמר)`);
       try {
         recResults = await downloadResolvedRecordings(
           resolved, subfolder, picker,
-          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מוריד`),
+          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — נשמר`),
+          (rec, recv, total) => setStatus(`🎥 ${rec.topic || rec.url} — מוריד ${zoomBytesLabel(recv, total)}`),
         );
       } catch (e) {
         setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
         recResults = [];
       }
     } else {
-      setStatus(`🎥 מחלץ קישורי וידאו ל-${recList.length} הקלטות (${recConc} במקביל, איכות: ${quality})...`);
+      setStatus(`🎥 מחלץ קישורי וידאו ל-${recList.length} הקלטות (${recConc} במקביל, איכות: ${quality})... אל תסגור את הפופאפ עד שההורדה תיגמר.`);
       try {
         recResults = await downloadZoomRecordings(
           recList,
-          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומתחיל הורדה`),
+          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומוריד`),
           recConc,
           subfolder,
           quality,
+          (rec, recv, total) => setStatus(`🎥 ${rec.topic || rec.url} — מוריד ${zoomBytesLabel(recv, total)}`),
         );
       } catch (e) {
         setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
@@ -1424,9 +1432,11 @@ $('downloadZoomVideos').addEventListener('click', async () => {
       const firstErr = recResults.find(r => r.error)?.error || 'סיבה לא ידועה';
       setStatus(`🎥 אף הקלטה לא ירדה. שגיאה ראשונה: ${firstErr}`);
     } else {
-      setStatus(`🎥 ${okR}/${recResults.length} הקלטות החלו לרדת${failR ? ` (${failR} נכשלו)` : ''}. ההורדה ממשיכה ברקע — אפשר לסגור את הפופאפ.`);
+      const totalBytes = recResults.reduce((s, r) => s + (r.bytes || 0), 0);
+      const sizeBit = totalBytes ? ` (${formatBytes(totalBytes)})` : '';
+      setStatus(`🎥 ${okR}/${recResults.length} הקלטות ירדו${sizeBit}${failR ? ` (${failR} נכשלו)` : ''}. ✅`);
     }
-    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו החלו לרדת`);
+    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו ירדו`);
   } finally {
     $('downloadZoomLinks').disabled = false;
     $('downloadZoomVideos').disabled = false;
@@ -2256,11 +2266,84 @@ function summariseResolutions(resolved) {
   return [...map.values()].sort((a, b) => b.score - a.score);
 }
 
-// Phase 2 — hand each resolved recording's chosen URL to
-// chrome.downloads.download (browser process → survives popup close).
-// `picker(candidates) → url|null`. Returns the summary array of
-// { recording, url?, resolution?, downloadId?, error? }.
-async function downloadResolvedRecordings(resolved, subfolder, picker, onProgress) {
+// Fetch a signed ssrweb MP4 ourselves and return it as a Blob. This is the
+// crux of the v1.32 fix: a fetch from the popup is an `xmlhttprequest`, which
+// the declarativeNetRequest referer rule DOES modify — so the CDN sees the
+// account-domain Referer and serves the real video bytes. Handing the bare URL
+// to chrome.downloads.download instead fails, because that request is
+// browser-initiated and DNR's modifyHeaders does NOT apply to it → the CDN
+// returns an HTML 403 page and Chrome saves it as ".htm" ("File wasn't
+// available on site"). See download-probe in runZoomDiagnostic, which proved
+// withReferer fetch returns video/mp4 while the download saved HTML.
+//
+// `onBytes(received, total)` is called as the body streams in (total may be 0
+// if the CDN omits Content-Length). NOTE: the whole file is held in memory;
+// fine for the ~115MB recordings we see, but very large files (multi-GB) would
+// need a streaming-to-disk approach (File System Access API) — see SESSION-NEXT.
+async function fetchRecordingBlob(url, onBytes) {
+  const r = await fetch(url, { method: 'GET' });
+  if (!r.ok) {
+    throw new Error(`השרת החזיר ${r.status} ${r.statusText || ''} — ייתכן שהקישור פג. סרוק מחדש סמוך ללחיצה.`);
+  }
+  const ct = r.headers.get('content-type') || '';
+  if (/text\/html/i.test(ct)) {
+    throw new Error('השרת החזיר דף HTML במקום וידאו — הקישור כנראה פג או נחסם. סרוק מחדש סמוך ללחיצה.');
+  }
+  const total = +(r.headers.get('content-length') || 0) || 0;
+  let blob;
+  if (r.body?.getReader) {
+    const reader = r.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      try { onBytes?.(received, total); } catch {}
+    }
+    blob = new Blob(chunks, { type: ct || 'video/mp4' });
+  } else {
+    blob = await r.blob();
+  }
+  if (!blob.size) throw new Error('התקבל קובץ ריק.');
+  return blob;
+}
+
+// Save a Blob via chrome.downloads (so it lands like any normal download) and
+// revoke the object URL once the write finishes. The blob is owned by THIS
+// popup document, so the URL must stay alive until the download completes —
+// closing the popup mid-write would abort it (hence the updated UI message).
+async function downloadBlobAndRevoke(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  let downloadId;
+  try {
+    downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
+  } catch (e) {
+    URL.revokeObjectURL(url);
+    throw e;
+  }
+  const cleanup = (delta) => {
+    if (delta.id !== downloadId) return;
+    const st = delta.state?.current;
+    if (st === 'complete' || st === 'interrupted') {
+      URL.revokeObjectURL(url);
+      chrome.downloads.onChanged.removeListener(cleanup);
+    }
+  };
+  chrome.downloads.onChanged.addListener(cleanup);
+  // Safety net in case onChanged never fires for this id.
+  setTimeout(() => {
+    try { URL.revokeObjectURL(url); chrome.downloads.onChanged.removeListener(cleanup); } catch {}
+  }, 15 * 60 * 1000);
+  return downloadId;
+}
+
+// Phase 2 — for each resolved recording, fetch the chosen signed MP4 into a
+// Blob (so the referer rule actually applies, see fetchRecordingBlob) and save
+// it. `picker(candidates) → url|null`. Returns the summary array of
+// { recording, url?, resolution?, downloadId?, bytes?, error? }.
+async function downloadResolvedRecordings(resolved, subfolder, picker, onProgress, onBytes) {
   const out = [];
   let done = 0;
   for (const { recording, candidates } of resolved) {
@@ -2272,11 +2355,14 @@ async function downloadResolvedRecordings(resolved, subfolder, picker, onProgres
         const stem = transcriptFileStem(recording);
         const fname = `${stem}.mp4`;
         const filename = subfolder ? `${subfolder}/${fname}` : fname;
-        const downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
-        out.push({ recording, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length });
+        const blob = await fetchRecordingBlob(url, (recv, total) => {
+          try { onBytes?.(recording, recv, total); } catch {}
+        });
+        const downloadId = await downloadBlobAndRevoke(blob, filename);
+        out.push({ recording, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length, bytes: blob.size });
       }
     } catch (e) {
-      out.push({ recording, error: String(e) });
+      out.push({ recording, error: String(e?.message || e) });
     }
     done++;
     try { onProgress?.(done, resolved.length, recording); } catch {}
@@ -2286,9 +2372,9 @@ async function downloadResolvedRecordings(resolved, subfolder, picker, onProgres
 
 // Convenience wrapper for the non-interactive 'best'/'smallest' paths:
 // resolve then download in one go.
-async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality) {
+async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality, onBytes) {
   const resolved = await resolveRecordingCandidates(recordings, onProgress, concurrency);
-  return downloadResolvedRecordings(resolved, subfolder, (c) => pickRecordingUrl(c, quality));
+  return downloadResolvedRecordings(resolved, subfolder, (c) => pickRecordingUrl(c, quality), null, onBytes);
 }
 
 // In-popup modal that asks the user which resolution they want. `options`
