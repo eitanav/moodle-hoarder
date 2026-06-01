@@ -52,7 +52,30 @@
     background: var(--bg);
     color: var(--fg);
     line-height: 1.55;
+    /* Explicit RTL anchoring. Without these, mixed Hebrew + English
+       content (code blocks, brand names like "Moodle", "Downloads")
+       triggers the Unicode bidi algorithm in weird ways, and you
+       sometimes see lines that visually start from the left edge. */
+    direction: rtl;
+    text-align: right;
   }
+  /* Code blocks inside Hebrew prose. Without a forced LTR direction,
+     "<code>&lt;html lang&gt;</code>" inside a Hebrew sentence shows up
+     reversed ("&gt;gnal lmth&lt;") because the engine treats it as
+     part of the RTL run. unicode-bidi: isolate gives the snippet its
+     own LTR mini-context so it renders left-to-right but stays in
+     the right place inside the Hebrew flow. */
+  code {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-family: Consolas, 'Courier New', monospace;
+    background: rgba(127,127,127,0.12);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.92em;
+  }
+  /* Same isolation for inline Latin emphasised text. */
+  .hint strong { unicode-bidi: isolate; }
   header {
     background: linear-gradient(135deg, var(--accent-2), var(--accent));
     color: white;
@@ -61,9 +84,10 @@
     align-items: center;
     gap: 14px;
   }
-  header img { width: 40px; height: 40px; }
-  header h1 { margin: 0; font-size: 22px; font-weight: 600; }
-  header .sub { font-size: 12px; opacity: .9; margin-top: 3px; }
+  header img { width: 40px; height: 40px; flex-shrink: 0; }
+  header > div { flex: 1; text-align: right; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 600; text-align: right; }
+  header .sub { font-size: 12px; opacity: .9; margin-top: 3px; text-align: right; }
   main {
     max-width: 760px;
     margin: 20px auto;
@@ -79,11 +103,13 @@
     margin: 0 0 4px;
     font-size: 16px;
     color: var(--accent);
+    text-align: right;
   }
   section .desc {
     color: var(--muted);
     font-size: 12px;
     margin: 0 0 12px;
+    text-align: right;
   }
 
   .row {
@@ -97,15 +123,21 @@
   .row .label {
     flex: 1;
     min-width: 0;
+    /* Defensive — text inside .label MUST align to the start (right
+       in RTL). Some browsers fail to inherit this through flex. */
+    text-align: right;
   }
   .row .label .name {
     font-weight: 600;
     font-size: 13px;
+    text-align: right;
   }
   .row .label .hint {
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 1.6;
     color: var(--muted);
-    margin-top: 2px;
+    margin-top: 4px;
+    text-align: right;
   }
   .row .control {
     flex-shrink: 0;
@@ -134,14 +166,18 @@
     background: white;
     border-radius: 50%;
     top: 2px;
-    right: 2px;
-    transition: right .15s, left .15s;
+    /* Logical positioning — knob always starts at the inline-start
+       edge (right in RTL, left in LTR) when off, slides to
+       inline-end when on. Matches OS-level toggle conventions in
+       each writing direction. */
+    inset-inline-start: 2px;
+    transition: inset-inline-start .15s;
     box-shadow: 0 1px 3px rgba(0,0,0,.2);
   }
   .toggle:checked {
     background: linear-gradient(135deg, var(--accent-2), var(--accent));
   }
-  .toggle:checked::after { right: 20px; }
+  .toggle:checked::after { inset-inline-start: 20px; }
 
   /* radio group as button row */
   .radios {
@@ -206,7 +242,8 @@
   #status {
     position: fixed;
     bottom: 24px;
-    right: 24px;
+    /* Logical end — bottom-left in RTL, bottom-right in LTR. */
+    inset-inline-end: 24px;
     padding: 12px 20px;
     background: linear-gradient(135deg, #43a047, #1b5e20);
     color: white;
@@ -247,7 +284,7 @@
   }
   table.history th, table.history td {
     padding: 6px 10px;
-    text-align: right;
+    text-align: start;
     border-bottom: 1px solid var(--border);
   }
   table.history th {
