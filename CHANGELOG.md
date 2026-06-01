@@ -4,6 +4,30 @@
 
 ---
 
+## v1.29.0 — מחקר עמוק: network trace מלא עם chrome.debugger
+
+תיקון ה-Referer (v1.28) לא פתר — עדיין יורדים קבצי `.htm` מבוטלים. הסיבה שאנחנו תקועים: כל הדיבאג עד עכשיו התבסס על monkey-patch ל-fetch/XHR, אבל **בקשת ה-`<video>` שמושכת את ה-MP4 לא עוברת דרך fetch/XHR** — אז היינו עיוורים בדיוק לבקשה הקריטית, ולא ראינו את ה-headers/status/גוף-השגיאה האמיתיים. מפסיקים לנחש.
+
+### כלי 🔬 מחקר עמוק
+
+כפתור חדש שמשתמש ב-`chrome.debugger` (Network domain, נדרשה הרשאת `debugger`) כדי להקליט ברמת הדפדפן את **כל** בקשות הרשת בזמן שהנגן מתנגן:
+
+- **request headers מלאים** — Referer, Cookie (שמות בלבד, ערכים מצונזרים), Range, Authorization, Sec-Fetch-*.
+- **response** — status, statusText, mimeType, response headers, redirects, remote IP, גודל.
+- **גוף תגובות שגיאה/HTML** (לא בינאריים גדולים) — כך נראה מילולית מה Zoom מחזיר כשהוא דוחה (פג? נחסם? צריך cookie?).
+- **מצב הנגן הסופי** — `<video>.currentSrc`, readyState, error code.
+- **summary** — בקשת הווידאו המנגנת (`foundPlayingMediaUrl`) וה-headers שלה, בקשות ssrweb/HLS/שגיאה.
+
+זה חושף בדיוק איך אריאל/Zoom מגישים את הווידאו, וממנו נדע איך לשכפל את ההורדה.
+
+### איך לבחון
+
+1. **טען מחדש את התוסף** (chrome://extensions → Reload) — חובה, הרשאה חדשה.
+2. סרוק → בחר הקלטה אחת → לחץ **🔬 מחקר עמוק**. ייפתח טאב, ייתכן באנר "started debugging" (תקין). חכה ~30 שניות.
+3. לחץ **📋 העתק הכל** ושלח את ה-JSON. ממנו נבין את המנגנון המדויק.
+
+---
+
 ## v1.28.0 — תיקון הורדת הווידאו: כותרת Referer ל-CDN של Zoom
 
 המשתמש שיתף צילום מסך: ההורדות נכשלות כקבצי `.htm` עם **"File wasn't available on site"**, עם שמות של הקלטות (`חיישנים_2026-04-26_10-03.htm`).
