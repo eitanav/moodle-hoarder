@@ -1343,6 +1343,9 @@ $('downloadZoomVideos').addEventListener('click', async () => {
       setStatus('🎥 לא הצלחתי לחלץ קישורי share — אי אפשר להוריד וידאו. נסה שוב או בדוק שאתה מחובר ל-Zoom.');
       return;
     }
+    // Make sure the CDN referer rule is live before any chrome.downloads call,
+    // otherwise ssrweb returns an HTML 403 and we'd save a .htm file.
+    await ensureZoomReferrerRule();
     const quality = $('zoomQuality')?.value || 'best';
     const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
     const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -1426,6 +1429,46 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     $('backZoom').disabled = false;
   }
 });
+
+// ========== Zoom CDN referer fix ==========
+// Zoom's signed recording URLs on ssrweb.zoom.us are served by a CDN that
+// rejects requests lacking a zoom.us Referer with an HTML 403 page. The
+// player sends that Referer automatically; chrome.downloads.download (and a
+// bare fetch from the extension) does not — so the "download" saves the
+// HTML error page (.htm, "File wasn't available on site"). A dynamic
+// declarativeNetRequest rule re-adds the Referer/Origin for ssrweb requests
+// so downloads (and the diagnostic's probe fetch) get the real bytes.
+const ZOOM_REFERER_RULE_ID = 9011;
+let _zoomRefererRuleInstalled = false;
+async function ensureZoomReferrerRule() {
+  if (_zoomRefererRuleInstalled) return true;
+  if (!chrome.declarativeNetRequest?.updateDynamicRules) return false;
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [ZOOM_REFERER_RULE_ID],
+      addRules: [{
+        id: ZOOM_REFERER_RULE_ID,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders: [
+            { header: 'referer', operation: 'set', value: 'https://zoom.us/' },
+            { header: 'origin', operation: 'set', value: 'https://zoom.us' },
+          ],
+        },
+        condition: {
+          urlFilter: '||ssrweb.zoom.us',
+          resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'media', 'other', 'image'],
+        },
+      }],
+    });
+    _zoomRefererRuleInstalled = true;
+    return true;
+  } catch (e) {
+    console.warn('[MH] failed to install Zoom referer rule:', e);
+    return false;
+  }
+}
 
 // ========== Zoom diagnostic ==========
 // A self-contained, step-by-step tracer for the whole video pipeline.
@@ -1663,8 +1706,34 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
     onProgress?.('6/6 בדיקת רשת של הנגן (פותח טאב נסתר, ~25 שניות)...');
     const probe = await probePlayerNetwork(shareUrls[0], (n, secs) => onProgress?.(`6/6 בדיקת נגן — נתפסו ${n} כתובות (${secs} שניות)`));
     step('player-network-probe', probe);
-    trace.summary.signedMp4Found = !!(probe.classification && probe.classification.signedMp4 && probe.classification.signedMp4.length);
+    const signed = probe.classification?.signedMp4 || [];
+    trace.summary.signedMp4Found = signed.length > 0;
     trace.summary.playerUsesHls = !!(probe.classification && probe.classification.hls && probe.classification.hls.length);
+
+    // Step 7 — download probe: actually fetch the first bytes of the signed
+    // MP4 the way the download will, WITH and WITHOUT the referer rule, so we
+    // can see whether the CDN returns video bytes or an HTML 403 page (the
+    // .htm "File wasn't available" symptom). This confirms the referer fix.
+    if (signed.length) {
+      const testUrl = signed[0].url;
+      const doFetch = async () => {
+        try {
+          const r = await fetch(testUrl, { method: 'GET', headers: { Range: 'bytes=0-1' } });
+          const ct = r.headers.get('content-type') || '';
+          let bodyStart = '';
+          try { bodyStart = (await r.clone().text()).slice(0, 120); } catch {}
+          return { status: r.status, ok: r.ok, contentType: ct, contentLength: r.headers.get('content-length'), looksHtml: /text\/html/i.test(ct) || /^\s*<(?:!doctype|html)/i.test(bodyStart), bodyStart: /text\/html/i.test(ct) ? bodyStart : undefined };
+        } catch (e) { return { error: String(e) }; }
+      };
+      onProgress?.('7/7 בדיקת הורדה בלי Referer...');
+      const without = await doFetch();
+      onProgress?.('7/7 בדיקת הורדה עם Referer...');
+      const ruleOk = await ensureZoomReferrerRule();
+      const withRef = await doFetch();
+      step('download-probe', { url: testUrl.slice(0, 200), refererRuleInstalled: ruleOk, withoutReferer: without, withReferer: withRef });
+      trace.summary.downloadServesVideo = !!(withRef.ok && /video|octet-stream|mp4/i.test(withRef.contentType || '') && !withRef.looksHtml);
+      trace.summary.refererFixedIt = !!(without.looksHtml && trace.summary.downloadServesVideo);
+    }
   } else {
     step('player-network-probe', { skipped: 'no share URL to probe' });
     trace.summary.signedMp4Found = false;
@@ -1687,8 +1756,14 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
     verdict = s.playerUsesHls
       ? 'הקישור נחלץ, אך הנגן משתמש ב-HLS (m3u8) ולא ב-MP4 ישיר — צריך לוגיקת הורדה אחרת. ראה player-network-probe.classification.'
       : 'הקישור נחלץ אך לא נתפס signed MP4 מ-ssrweb. ייתכן שהנגן לא נטען בטאב רקע, ה-URL פג, או שהפורמט השתנה. ראה player-network-probe.allUrls.';
+  } else if (s.downloadServesVideo === false) {
+    verdict = 'נמצא signed MP4, אבל בקשת ההורדה מקבלת דף HTML במקום וידאו (זה מקור קובצי ה-.htm "File wasn\'t available"). ראה download-probe — אם withReferer עדיין HTML, ה-URL כנראה פג; אם withoutReferer הוא HTML ו-withReferer וידאו, כלל ה-Referer מתקן את זה.';
+  } else if (s.refererFixedIt) {
+    verdict = '✅ אובחן ותוקן: בלי Referer ה-CDN מחזיר HTML (שזה היה הבאג), ועם כלל ה-Referer מתקבל וידאו אמיתי. ההורדה אמורה לעבוד עכשיו (v1.28.0 מוסיף את ה-Referer אוטומטית). נסה 🎥.';
+  } else if (s.downloadServesVideo) {
+    verdict = '✅ הכל תקין: טבלה ✓, קליק ✓, דף פרטים ✓, קישור share ✓, signed MP4 ✓, וההורדה מחזירה וידאו אמיתי ✓. 🎥 אמור לעבוד. אם לא — סרוק מחדש סמוך ללחיצה (URLs פגים תוך ~שעתיים).';
   } else {
-    verdict = 'הכל נראה תקין: טבלה ✓, קליק ✓, דף פרטים ✓, קישור share ✓, signed MP4 ✓. אם ההורדה עדיין נכשלת — ייתכן שה-URL פג (signed URLs פגים תוך ~שעתיים) או בעיית הרשאות בהורדה. נסה לסרוק מחדש ולהוריד מיד.';
+    verdict = 'נמצא signed MP4 אך בדיקת ההורדה לא הושלמה. ראה download-probe / player-network-probe לפרטים.';
   }
   trace.summary.verdict = verdict;
   return trace;
