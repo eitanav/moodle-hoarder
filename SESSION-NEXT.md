@@ -14,6 +14,17 @@
 
 **מצב:** טרם אומת ע"י המשתמש שההורדה עובדת אחרי התיקון. **שלב ראשון בסשן הבא:** לשאול אם 🎥 מוריד MP4 תקין ב-1.31.0.
 
+### ⚠️ עדכון (סוף הסשן): 1.31.0 עדיין מוריד .htm — Referer דרך DNR כנראה לא חל על chrome.downloads
+
+trace שני (v1.31.0) הראה: בקשת ה-MP4 של **הדפדפן** עדיין 206 תקין עם `Referer: https://ariel-ac-il.zoom.us/` (התיקון נכון, הנגן לא נשבר). אבל **ההורדה שלנו עדיין .htm**. החשד החזק: **`declarativeNetRequest modifyHeaders` לא חל על בקשות `chrome.downloads.download`** (browser-initiated), אז ה-Referer לא נשלח בהורדה בכלל → 403 HTML.
+
+**הניסוי המכריע לסשן הבא:** בקש מהמשתמש להריץ **🩺 דיאגנוסטיקה** (לא 🔬) ולשלוח את שלב `download-probe`:
+- אם `withReferer` מחזיר `video/mp4` (fetch מ-popup, resourceType=xmlhttprequest ש-DNR כן נוגע בו) אבל ההורדה נכשלת → **אושר**: DNR עובד ל-fetch אבל לא ל-downloads.
+- הפתרון אז: **fetch את ה-MP4 בהקשר של דף ה-Zoom** (שם ה-Referer אוטומטי `<account>.zoom.us/`) → `blob` → `chrome.downloads.download` עם blob URL / `URL.createObjectURL`. סיכון: קבצים 200MB–2GB ב-זיכרון. ל-115MB עובד; לגדולים צריך streaming (אולי `fetch` עם reader → כתיבה, או File System Access API).
+- חלופה: לבדוק אם DNR כן תופס הורדות עם `resourceTypes` כולל `'other'` בלי הגבלה / עם `initiatorDomains` — אבל סביר שלא.
+
+**הדרך הכי חסינה (מומלץ):** לחקות את ה-API לגמרי — ה-background (`deepZoomResearch`) כבר תופס תגובות Network עם debugger; לתפוס את תגובת `play/info`, לפרסר `viewMp4Url`, ולהביא אותו עם `fetch` מהקשר הדף → blob → הורדה.
+
 **אם Referer לבד לא מספיק** — הדרך החסינה: לחקות את ה-API. ה-background כבר יודע לתפוס תגובות Network עם ה-debugger; לתפוס את תגובת `play/info`, לפרסר `viewMp4Url`, ולהוריד אותו ישירות (עוקף את תפיסת `<video>.src`). ראה `deepZoomResearch` ב-`background.js` כבסיס.
 
 ### לקח תפעולי קריטי (בזבז חצי סשן)
