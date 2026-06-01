@@ -2,7 +2,7 @@
 
 > **קרא אותי קודם.** זה המסמך להמשך ישיר מאיפה שעצרנו. אחרי שתקרא — קרא גם `CHANGELOG.md` (5 גרסאות אחרונות) ו-`ROADMAP-100.md`.
 
-## איפה אנחנו (v1.25.0, git נקי, הכל בענן)
+## איפה אנחנו (v1.26.0, git נקי, הכל בענן)
 
 הפרויקט הוא תוסף Chrome (MV3) שאוסף חומר מקורסים במודל אריאל (`moodlearn.ariel.ac.il`) ל-ZIP. הרפו: https://github.com/eitanav/moodle-hoarder. תיקייה מקומית: `C:\Users\USER\Documents\Extensions\moodle-hoarder`.
 
@@ -38,7 +38,7 @@
 
 ## בקשות פתוחות מהמשתמש (לא הושלמו)
 
-1. **בורר איכות אמיתי ('ask')** — כרגע 'ask' מתנהג כמו 'best'. המשתמש רוצה שבאמת ישאל. צריך לאסוף את כל הרזולוציות מראש, ואז dialog/prompt בפופאפ. עדיפות בינונית.
+1. ~~**בורר איכות אמיתי ('ask')**~~ — ✅ **בוצע ב-v1.26.0.** 'ask' עכשיו מחלץ את כל הרזולוציות מראש (`resolveRecordingCandidates`), מציג מודאל בחירה בפופאפ (`chooseQualityDialog`), ומוריד מהקישורים שכבר נאספו (בלי חילוץ חוזר). **טרם נבדק על קורס אמיתי** — צריך לאמת שהמודאל קופץ ושההורדה יורדת ברזולוציה הנכונה.
 2. **גרסה 2.0** — המשתמש שאל מתי מוצדק. ראה סעיף למטה.
 
 ## על גרסה 2.0 — מה אמרתי למשתמש
@@ -82,9 +82,14 @@
 ## פונקציות מפתח להורדת וידאו (לעיון מהיר)
 
 - `extractRecordingCandidates(rec)` — popup.js ~1594. פותח tab, monitor, Play, מחזיר signed URLs.
-- `pickRecordingUrl(candidates, quality)` — popup.js ~1684.
-- `downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality)` — popup.js ~1698.
-- `$('downloadZoomVideos')` handler — popup.js ~1333.
+- `pickRecordingUrl(candidates, quality)` — בוחר best/smallest.
+- `pickRecordingUrlByLabel(candidates, label)` — בוחר לפי הרזולוציה שנבחרה ב-'ask' (fallback לקרובה ביותר).
+- `resolveRecordingCandidates(recordings, onProgress, concurrency)` — שלב איתור: מחזיר `[{recording, candidates}]`.
+- `summariseResolutions(resolved)` — בונה רשימת רזולוציות ייחודיות לדיאלוג.
+- `downloadResolvedRecordings(resolved, subfolder, picker, onProgress)` — שלב הורדה מהקישורים שכבר נאספו.
+- `chooseQualityDialog(options)` — מודאל הבחירה בפופאפ (מחזיר Promise<value|null>).
+- `downloadZoomRecordings(...)` — wrapper דק (resolve+download) ל-best/smallest.
+- `$('downloadZoomVideos')` handler — popup.js ~1333 (כולל ענף 'ask').
 - `vttToCleanText(vtt)` — popup.js ~1573. (timestamped TXT)
 - `_resolutionScore` / `_resolutionLabel` — popup.js ~1567. (פרסור 1366x768 משם הקובץ)
 

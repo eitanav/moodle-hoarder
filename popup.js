@@ -1346,19 +1346,70 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     const quality = $('zoomQuality')?.value || 'best';
     const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
     const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-    setStatus(`🎥 מחלץ קישורי וידאו ל-${withUrls.length} הקלטות (${recConc} במקביל, איכות: ${quality})...`);
+    const recList = withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId }));
     let recResults = [];
-    try {
-      recResults = await downloadZoomRecordings(
-        withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId })),
-        (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומתחיל הורדה`),
-        recConc,
-        subfolder,
-        quality,
-      );
-    } catch (e) {
-      setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
-      recResults = [];
+    if (quality === 'ask') {
+      // Resolve every recording's candidates first, then ask which
+      // resolution to use, then download from the cached candidates (no
+      // re-extraction — signed URLs expire and re-running doubles the wait).
+      setStatus(`🎥 מאתר איכויות זמינות ל-${recList.length} הקלטות (${recConc} במקביל, ~25 שניות לכל אחת)...`);
+      let resolved = [];
+      try {
+        resolved = await resolveRecordingCandidates(
+          recList,
+          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מאתר איכויות`),
+          recConc,
+        );
+      } catch (e) {
+        setStatus('🎥 שגיאה באיתור איכויות: ' + e.message);
+        return;
+      }
+      const resolutions = summariseResolutions(resolved);
+      if (resolutions.length === 0) {
+        setStatus('🎥 לא נתפסו קישורי וידאו לאף הקלטה (הנגן אולי לא נטען, או שהקישורים פגו — סרוק מחדש סמוך ללחיצה).');
+        return;
+      }
+      let picker;
+      if (resolutions.length === 1) {
+        setStatus(`🎥 רק איכות אחת זמינה (${resolutions[0].label}) — מוריד אותה.`);
+        picker = (c) => pickRecordingUrl(c, 'best');
+      } else {
+        const options = resolutions.map(r => ({
+          label: r.label === 'unknown' ? 'איכות לא ידועה' : r.label,
+          value: r.label,
+          sub: `${r.count}/${resolved.length} הקלטות`,
+        }));
+        const choice = await chooseQualityDialog(options);
+        if (choice === null) {
+          setStatus('🎥 ההורדה בוטלה.');
+          return;
+        }
+        picker = (c) => pickRecordingUrlByLabel(c, choice);
+      }
+      setStatus(`🎥 מתחיל הורדה...`);
+      try {
+        recResults = await downloadResolvedRecordings(
+          resolved, subfolder, picker,
+          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מוריד`),
+        );
+      } catch (e) {
+        setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
+        recResults = [];
+      }
+    } else {
+      setStatus(`🎥 מחלץ קישורי וידאו ל-${recList.length} הקלטות (${recConc} במקביל, איכות: ${quality})...`);
+      try {
+        recResults = await downloadZoomRecordings(
+          recList,
+          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומתחיל הורדה`),
+          recConc,
+          subfolder,
+          quality,
+        );
+      } catch (e) {
+        setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
+        recResults = [];
+      }
     }
     const okR = recResults.filter(r => r.downloadId).length;
     const failR = recResults.length - okR;
@@ -2001,19 +2052,42 @@ async function extractRecordingCandidates(rec) {
 // Picks one URL from candidates per the quality preference.
 //   'best'     → highest resolution
 //   'smallest' → lowest resolution
-//   'ask'      → (popup can't prompt mid-flow easily) treated as 'best'
+// ('ask' is handled separately by the popup, which resolves candidates
+//  first, shows a chooser, then picks by the user's chosen label.)
 function pickRecordingUrl(candidates, quality) {
   if (!candidates || candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
   const sorted = [...candidates].sort((a, b) => _resolutionScore(b) - _resolutionScore(a));
   if (quality === 'smallest') return sorted[sorted.length - 1];
-  return sorted[0]; // 'best' and 'ask' default to highest
+  return sorted[0]; // 'best' defaults to highest
 }
 
-// Extracts recording URLs for a list of recordings (parallel pool), then
-// hands each to chrome.downloads.download. Returns a summary array of
-// { recording, url?, resolution?, downloadId?, error? }.
-async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality) {
+// Score a "WxH" resolution label (e.g. "1366x768") to a pixel count.
+function _labelScore(label) {
+  const m = (label || '').match(/(\d{3,4})x(\d{3,4})/);
+  return m ? (+m[1]) * (+m[2]) : 0;
+}
+
+// Picks the candidate whose resolution matches a label the user chose in
+// the 'ask' dialog. Falls back to the closest available resolution when a
+// given recording doesn't carry that exact one (recordings can differ).
+function pickRecordingUrlByLabel(candidates, label) {
+  if (!candidates || candidates.length === 0) return null;
+  const exact = candidates.find(c => _resolutionLabel(c) === label);
+  if (exact) return exact;
+  const target = _labelScore(label);
+  if (!target) return pickRecordingUrl(candidates, 'best');
+  return [...candidates].sort(
+    (a, b) => Math.abs(_resolutionScore(a) - target) - Math.abs(_resolutionScore(b) - target),
+  )[0];
+}
+
+// Phase 1 — resolve the signed MP4 candidates for every recording, in a
+// parallel pool. Returns [{ recording, candidates }]. Slow (each opens a
+// hidden tab + plays); separated from the download so 'ask' can show a
+// chooser in between WITHOUT re-extracting (signed URLs expire in ~2h, and
+// re-running would double the wait).
+async function resolveRecordingCandidates(recordings, onProgress, concurrency) {
   const out = new Array(recordings.length);
   let nextIdx = 0;
   let doneCount = 0;
@@ -2023,27 +2097,107 @@ async function downloadZoomRecordings(recordings, onProgress, concurrency, subfo
       const myIdx = nextIdx++;
       if (myIdx >= recordings.length) return;
       const rec = recordings[myIdx];
-      try {
-        const candidates = await extractRecordingCandidates(rec);
-        const url = pickRecordingUrl(candidates, quality);
-        if (!url) {
-          out[myIdx] = { recording: rec, error: 'לא נתפס קישור וידאו (הנגן אולי לא נטען או אין הקלטה זמינה)' };
-        } else {
-          const stem = transcriptFileStem(rec);
-          const fname = `${stem}.mp4`;
-          const filename = subfolder ? `${subfolder}/${fname}` : fname;
-          const downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
-          out[myIdx] = { recording: rec, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length };
-        }
-      } catch (e) {
-        out[myIdx] = { recording: rec, error: String(e) };
-      }
+      let candidates = [];
+      try { candidates = await extractRecordingCandidates(rec); } catch {}
+      out[myIdx] = { recording: rec, candidates };
       doneCount++;
       try { onProgress?.(doneCount, recordings.length, rec); } catch {}
     }
   }
   await Promise.all(Array.from({ length: C }, worker));
   return out;
+}
+
+// Build the set of distinct resolutions available across resolved
+// recordings, highest first. Returns [{ label, score, count }] where count
+// is how many recordings offer that resolution.
+function summariseResolutions(resolved) {
+  const map = new Map();
+  for (const r of resolved) {
+    for (const c of (r.candidates || [])) {
+      const label = _resolutionLabel(c);
+      const cur = map.get(label) || { label, score: _resolutionScore(c), count: 0 };
+      cur.count++;
+      map.set(label, cur);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.score - a.score);
+}
+
+// Phase 2 — hand each resolved recording's chosen URL to
+// chrome.downloads.download (browser process → survives popup close).
+// `picker(candidates) → url|null`. Returns the summary array of
+// { recording, url?, resolution?, downloadId?, error? }.
+async function downloadResolvedRecordings(resolved, subfolder, picker, onProgress) {
+  const out = [];
+  let done = 0;
+  for (const { recording, candidates } of resolved) {
+    try {
+      const url = picker(candidates);
+      if (!url) {
+        out.push({ recording, error: 'לא נתפס קישור וידאו (הנגן אולי לא נטען או אין הקלטה זמינה)' });
+      } else {
+        const stem = transcriptFileStem(recording);
+        const fname = `${stem}.mp4`;
+        const filename = subfolder ? `${subfolder}/${fname}` : fname;
+        const downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
+        out.push({ recording, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length });
+      }
+    } catch (e) {
+      out.push({ recording, error: String(e) });
+    }
+    done++;
+    try { onProgress?.(done, resolved.length, recording); } catch {}
+  }
+  return out;
+}
+
+// Convenience wrapper for the non-interactive 'best'/'smallest' paths:
+// resolve then download in one go.
+async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality) {
+  const resolved = await resolveRecordingCandidates(recordings, onProgress, concurrency);
+  return downloadResolvedRecordings(resolved, subfolder, (c) => pickRecordingUrl(c, quality));
+}
+
+// In-popup modal that asks the user which resolution they want. `options`
+// is [{ label, value, sub }]. Resolves to the chosen `value`, or null if
+// the user cancels (Cancel button / Esc / backdrop click).
+function chooseQualityDialog(options) {
+  return new Promise((resolve) => {
+    const overlay = $('qualityOverlay');
+    const body = $('qualityOptions');
+    if (!overlay || !body) { resolve(null); return; }
+    body.innerHTML = '';
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      overlay.hidden = true;
+      body.innerHTML = '';
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    for (const opt of options) {
+      const b = document.createElement('button');
+      b.className = 'mh-q-btn';
+      const main = document.createElement('span');
+      main.textContent = opt.label;
+      b.appendChild(main);
+      if (opt.sub) {
+        const sub = document.createElement('span');
+        sub.className = 'mh-q-sub';
+        sub.textContent = opt.sub;
+        b.appendChild(sub);
+      }
+      b.addEventListener('click', () => done(opt.value));
+      body.appendChild(b);
+    }
+    $('qualityCancel').onclick = () => done(null);
+    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
+    document.addEventListener('keydown', onKey);
+    overlay.hidden = false;
+  });
 }
 
 function transcriptFileStem(rec) {
