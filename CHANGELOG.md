@@ -4,6 +4,32 @@
 
 ---
 
+## v1.31.0 — 🎯 פיצחנו את המנגנון: Referer של דומיין החשבון
+
+המחקר העמוק (chrome.debugger) סוף סוף תפס את **בקשת ה-MP4 האמיתית** (ה-`<video>` — בלתי נראית ל-fetch/XHR). מתוך ה-trace:
+
+### המנגנון המלא של אריאל/Zoom
+
+1. הנגן קורא ל-`/nws/common/2.0/nak?pms=Recording...` → מקבל **JWT bearer token** (קשור ל-session/cookies).
+2. קורא ל-`/nws/recording/1.0/play/info/<token>?originDomain=...` עם **`Authorization: Bearer <JWT>`** → ה-JSON מחזיר שדה **`viewMp4Url`** = ה-URL החתום המלא (S3 presigned: `data=`, `s001`, `cid`, `fid`, `s002`, `tid`).
+3. ה-`<video>` מושך מ-`ssrweb.zoom.us` עם `Range: bytes=0-` ו-**`Referer: https://ariel-ac-il.zoom.us/`** → **206 Partial Content**, `video/mp4`, ~115MB, `server: AmazonS3`. **אין HLS, אין DRM, אין MSE — MP4 ישיר.**
+
+### הבאג שתוקן
+
+v1.28 הגדיר `Referer: https://zoom.us/`, אבל ה-CDN דורש את **דומיין החשבון** `https://ariel-ac-il.zoom.us/`. ה-Referer השגוי → 403 HTML → Chrome שומר כ-`.htm` ומבטל ("File wasn't available on site"). זה **בדיוק** מה שראינו בצילומים.
+
+**התיקון:** `ensureZoomReferrerRule(refererOrigin)` גוזר עכשיו את ה-origin מתוך ה-share URL (`new URL(shareUrl).origin`) ומגדיר את ה-Referer/Origin לדומיין החשבון הנכון. כך זה עובד לכל מוסד (לא רק אריאל).
+
+### איך לבחון
+
+1. עדכן ל-1.31.0 (update.bat → Reload).
+2. סרוק → בחר הקלטה → 🎥 הורד סרטונים → אמור לרדת **`.mp4`** תקין שמתנגן.
+3. אם עדיין נכשל — 🔬 מחקר עמוק, ושלח את ה-JSON (שלב `download-probe` מראה אם withReferer מחזיר וידאו).
+
+> **לסשן הבא:** אם ה-Referer לבד לא מספיק, הדרך החסינה היא לחקות את ה-API: לתפוס את תגובת `play/info` (יש בה `viewMp4Url` מלא) דרך ה-debugger/Network שכבר קיים ב-background, ולהוריד את ה-URL הזה ישירות. זה עוקף לגמרי את תפיסת ה-`<video>.src`.
+
+---
+
 ## v1.30.0 — תיקון קריטי: המחקר העמוק רץ ב-service worker (לא נסגר עם הפופאפ)
 
 המשתמש הריץ 🔬 וכלום לא קרה: הטאב נפתח בחזית אבל שום דבר לא זז/ירד.
