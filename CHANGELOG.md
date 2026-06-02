@@ -4,6 +4,23 @@
 
 ---
 
+## v1.31.2 — באג חיתוך URL פסל את כל אבחוני ה-Referer
+
+ה-🩺 download-probe חשף ש**ה-Referer לא משנה כלום** — גם עם וגם בלי, התקבל 403 זהה. אבל מצאתי למה: ה-monitor שתופס URLs **חתך כל URL ל-600 תווים** (`s.slice(0, 600)`). ה-URL החתום של CloudFront ארוך ~1500–2500 תווים, וה-`Signature`/`Key-Pair-Id` בסוף — החיתוך מחק אותם → 403 AccessDenied **מובטח**. כל ה-probe בדק URL פגום. (נתיב ההורדה האמיתי לא חתך, אבל ה-probe הטעה אותנו לעבר תיאוריית ה-Referer.)
+
+### תיקונים
+
+1. **חיתוך 600→4000** ב-monitor (popup) וב-deep-research (background, 500→4000) — נתפס ה-URL המלא עם החתימה.
+2. **download-probe עם `credentials: 'include'`** — שולח cookies כמו הדפדפן.
+3. **תופס את גוף השגיאה** (`errorBody`) של S3/CloudFront — יגיד מילולית: AccessDenied / Missing Key-Pair-Id / Request has expired.
+4. ה-verdict עודכן בהתאם.
+
+### איך לבחון
+
+עדכן (update.bat → Reload, 1.31.2) → 🩺 דיאגנוסטיקה → שלח את `download-probe`. הפעם ה-URL מלא וה-fetch עם cookies — נדע **סוף-סוף** אם ה-URL המלא מחזיר וידאו, ואם לא — את הסיבה המדויקת מ-S3.
+
+---
+
 ## v1.31.0 — 🎯 פיצחנו את המנגנון: Referer של דומיין החשבון
 
 המחקר העמוק (chrome.debugger) סוף סוף תפס את **בקשת ה-MP4 האמיתית** (ה-`<video>` — בלתי נראית ל-fetch/XHR). מתוך ה-trace:

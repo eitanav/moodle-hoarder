@@ -243,7 +243,7 @@ async function deepZoomResearch(shareUrl) {
     }
     const all = Object.values(byId);
     report.requests = all.map(r => ({
-      url: (r.url || '').slice(0, 500), method: r.method, resourceType: r.resourceType,
+      url: (r.url || '').slice(0, 4000), method: r.method, resourceType: r.resourceType,
       status: r.status, statusText: r.statusText, mimeType: r.mimeType, bytes: r.bytes,
       failed: r.failed, blockedReason: r.blockedReason, redirectFrom: r.redirectFrom, remoteIP: r.remoteIP,
       requestHeaders: r.requestHeaders, responseHeaders: r.responseHeaders, bodySnippet: r.bodySnippet,
