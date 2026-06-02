@@ -1587,7 +1587,7 @@ async function probePlayerNetwork(shareUrl, onProgress) {
         const rem = (s, via) => {
           if (!s || typeof s !== 'string') return;
           if (s.startsWith('data:')) return;
-          window.__mhDiagUrls.push({ via, url: s.slice(0, 600), blob: s.startsWith('blob:') });
+          window.__mhDiagUrls.push({ via, url: s.slice(0, 4000), blob: s.startsWith('blob:') });
         };
         const scan = () => { for (const v of document.querySelectorAll('video, source')) rem(v.currentSrc || v.src || v.getAttribute('src'), 'media-src'); };
         new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
@@ -1727,11 +1727,12 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
       const testUrl = signed[0].url;
       const doFetch = async () => {
         try {
-          const r = await fetch(testUrl, { method: 'GET', headers: { Range: 'bytes=0-1' } });
+          const r = await fetch(testUrl, { method: 'GET', credentials: 'include', headers: { Range: 'bytes=0-1' } });
           const ct = r.headers.get('content-type') || '';
           let bodyStart = '';
-          try { bodyStart = (await r.clone().text()).slice(0, 120); } catch {}
-          return { status: r.status, ok: r.ok, contentType: ct, contentLength: r.headers.get('content-length'), looksHtml: /text\/html/i.test(ct) || /^\s*<(?:!doctype|html)/i.test(bodyStart), bodyStart: /text\/html/i.test(ct) ? bodyStart : undefined };
+          try { bodyStart = (await r.clone().text()).slice(0, 300); } catch {}
+          const isVideo = /video|octet-stream|mp4/i.test(ct);
+          return { status: r.status, ok: r.ok, contentType: ct, contentLength: r.headers.get('content-length'), isVideo, errorBody: isVideo ? undefined : bodyStart };
         } catch (e) { return { error: String(e) }; }
       };
       onProgress?.('7/7 בדיקת הורדה בלי Referer...');
@@ -1741,9 +1742,9 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
       try { _ro = new URL(shareUrls[0]).origin; } catch {}
       const ruleOk = await ensureZoomReferrerRule(_ro);
       const withRef = await doFetch();
-      step('download-probe', { url: testUrl.slice(0, 200), refererRuleInstalled: ruleOk, withoutReferer: without, withReferer: withRef });
-      trace.summary.downloadServesVideo = !!(withRef.ok && /video|octet-stream|mp4/i.test(withRef.contentType || '') && !withRef.looksHtml);
-      trace.summary.refererFixedIt = !!(without.looksHtml && trace.summary.downloadServesVideo);
+      step('download-probe', { urlFull: testUrl, urlLen: testUrl.length, refererRuleInstalled: ruleOk, withoutReferer: without, withReferer: withRef });
+      trace.summary.downloadServesVideo = !!(withRef.ok && withRef.isVideo);
+      trace.summary.refererFixedIt = !!(without.error || !without.isVideo) && trace.summary.downloadServesVideo;
     }
   } else {
     step('player-network-probe', { skipped: 'no share URL to probe' });
@@ -1768,7 +1769,7 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
       ? 'הקישור נחלץ, אך הנגן משתמש ב-HLS (m3u8) ולא ב-MP4 ישיר — צריך לוגיקת הורדה אחרת. ראה player-network-probe.classification.'
       : 'הקישור נחלץ אך לא נתפס signed MP4 מ-ssrweb. ייתכן שהנגן לא נטען בטאב רקע, ה-URL פג, או שהפורמט השתנה. ראה player-network-probe.allUrls.';
   } else if (s.downloadServesVideo === false) {
-    verdict = 'נמצא signed MP4, אבל בקשת ההורדה מקבלת דף HTML במקום וידאו (זה מקור קובצי ה-.htm "File wasn\'t available"). ראה download-probe — אם withReferer עדיין HTML, ה-URL כנראה פג; אם withoutReferer הוא HTML ו-withReferer וידאו, כלל ה-Referer מתקן את זה.';
+    verdict = 'נמצא signed MP4, אבל fetch ל-URL המלא (עם cookies) לא מחזיר וידאו. ראה download-probe.withReferer.errorBody — הוא מכיל את הודעת השגיאה המדויקת של S3/CloudFront (AccessDenied / Missing Key-Pair-Id / Request has expired). זה יגיד אם חסר חלק מה-URL, אם פג, או אם צריך להביא מהקשר הדף.';
   } else if (s.refererFixedIt) {
     verdict = '✅ אובחן ותוקן: בלי Referer ה-CDN מחזיר HTML (שזה היה הבאג), ועם כלל ה-Referer מתקבל וידאו אמיתי. ההורדה אמורה לעבוד עכשיו (v1.28.0 מוסיף את ה-Referer אוטומטית). נסה 🎥.';
   } else if (s.downloadServesVideo) {
