@@ -1350,18 +1350,47 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     let _refOrigin = 'https://zoom.us';
     try { _refOrigin = new URL(withUrls[0].shareUrls[0]).origin; } catch {}
     await ensureZoomReferrerRule(_refOrigin);
-    const quality = $('zoomQuality')?.value || 'best';
+    let quality = $('zoomQuality')?.value || 'best';
     // The signed CloudFront MP4 serves video to fetch() but chrome.downloads
     // gets an HTML 403 (proven by the diagnostic download-probe). So we hand
     // each recording to the background worker, which opens the playback page,
     // captures the signed URL, fetch()es it IN the page (correct cookies/CORS),
     // and saves it via a blob anchor. Runs in the SW so it survives popup close.
-    // NOTE: 'ask' currently behaves like 'best' on this path (chooser TBD).
+    //
+    // 'ask' → we first resolve the available resolutions (popup opens a hidden
+    // tab per recording, captures every signed URL, reads WxH from the file
+    // name), show the chooser, and pass the chosen WxH LABEL to the worker. The
+    // worker re-captures fresh signed URLs at download time (signed URLs expire
+    // in ~2h, so re-capturing per job is more robust than reusing what we found
+    // here) and picks the one matching the label (nearest if absent).
+    if (quality === 'ask') {
+      setStatus('🎥 מאתר רזולוציות זמינות... (נפתח טאב נסתר לכל הקלטה, ~דקה)');
+      const recsForResolve = withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId }));
+      const resolved = await resolveRecordingCandidates(
+        recsForResolve,
+        (done, total) => setStatus(`🎥 (${done}/${total}) מאתר רזולוציות זמינות...`),
+        2,
+      );
+      const resolutions = summariseResolutions(resolved);
+      if (!resolutions.length) {
+        setStatus('🎥 לא נמצאו רזולוציות (הנגן אולי לא נטען או הקישור פג). נסה שוב, או בחר "הטובה ביותר" בבורר האיכות.');
+        return;
+      }
+      const options = resolutions.map(r => ({
+        label: r.label,
+        value: r.label,
+        sub: `זמין ב-${r.count} מתוך ${withUrls.length} הקלטות`,
+      }));
+      const chosen = await chooseQualityDialog(options);
+      if (!chosen) { setStatus('🎥 הורדת הווידאו בוטלה.'); return; }
+      quality = chosen; // a WxH label the worker matches against
+    }
     const dlList = withUrls.map(r => ({ playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4' }));
     for (const d of dlList) {
       chrome.runtime.sendMessage({ type: 'mh-download-rec', playUrl: d.playUrl, filename: d.filename, quality });
     }
-    setStatus(`\u{1F3A5} ${dlList.length} הורדות נכנסו לתור ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר שמושך את הוידאו ושומר אותו — לקובץ גדול זה ייקח דקות. תופיע התראה לכל הקלטה כשמסתיים. אל תסגור את הדפדפן עד אז.`);
+    const qNote = /^\d+x\d+$/.test(quality) ? ` ברזולוציה ${quality}` : '';
+    setStatus(`\u{1F3A5} ${dlList.length} הורדות${qNote} נכנסו לתור ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר שמושך את הוידאו ושומר אותו — לקובץ גדול זה ייקח דקות. תופיע התראה לכל הקלטה כשמסתיים. אל תסגור את הדפדפן עד אז.`);
     notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
   } finally {
     $('downloadZoomLinks').disabled = false;

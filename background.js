@@ -346,8 +346,19 @@ async function _mhCaptureSignedUrl(tabId, quality) {
   }
   if (!urls.length) return null;
   const score = (u) => { const m = (u || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i); return m ? (+m[1]) * (+m[2]) : 0; };
+  const labelOf = (u) => { const m = (u || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i); return m ? `${m[1]}x${m[2]}` : 'unknown'; };
   urls.sort((a, b) => score(b) - score(a));
-  return quality === 'smallest' ? urls[urls.length - 1] : urls[0];
+  if (quality === 'smallest') return urls[urls.length - 1];
+  if (!quality || quality === 'best' || quality === 'ask') return urls[0];
+  // Otherwise `quality` is a WxH label the user chose in the 'ask' dialog: take
+  // the exact match, else the nearest available resolution (recordings can
+  // differ — one might not carry that exact rendition).
+  const exact = urls.find(u => labelOf(u) === quality);
+  if (exact) return exact;
+  const m = String(quality).match(/(\d{3,4})x(\d{3,4})/);
+  const target = m ? (+m[1]) * (+m[2]) : 0;
+  if (!target) return urls[0];
+  return [...urls].sort((a, b) => Math.abs(score(a) - target) - Math.abs(score(b) - target))[0];
 }
 
 // Wait for a download whose filename matches `stem` to finish (or fail).
