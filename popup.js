@@ -1351,82 +1351,18 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     try { _refOrigin = new URL(withUrls[0].shareUrls[0]).origin; } catch {}
     await ensureZoomReferrerRule(_refOrigin);
     const quality = $('zoomQuality')?.value || 'best';
-    const recConc = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 2));
-    const subfolder = (CACHED_SETTINGS?.downloadSubfolder || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-    const recList = withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId }));
-    let recResults = [];
-    if (quality === 'ask') {
-      // Resolve every recording's candidates first, then ask which
-      // resolution to use, then download from the cached candidates (no
-      // re-extraction — signed URLs expire and re-running doubles the wait).
-      setStatus(`🎥 מאתר איכויות זמינות ל-${recList.length} הקלטות (${recConc} במקביל, ~25 שניות לכל אחת)...`);
-      let resolved = [];
-      try {
-        resolved = await resolveRecordingCandidates(
-          recList,
-          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מאתר איכויות`),
-          recConc,
-        );
-      } catch (e) {
-        setStatus('🎥 שגיאה באיתור איכויות: ' + e.message);
-        return;
-      }
-      const resolutions = summariseResolutions(resolved);
-      if (resolutions.length === 0) {
-        setStatus('🎥 לא נתפסו קישורי וידאו לאף הקלטה (הנגן אולי לא נטען, או שהקישורים פגו — סרוק מחדש סמוך ללחיצה).');
-        return;
-      }
-      let picker;
-      if (resolutions.length === 1) {
-        setStatus(`🎥 רק איכות אחת זמינה (${resolutions[0].label}) — מוריד אותה.`);
-        picker = (c) => pickRecordingUrl(c, 'best');
-      } else {
-        const options = resolutions.map(r => ({
-          label: r.label === 'unknown' ? 'איכות לא ידועה' : r.label,
-          value: r.label,
-          sub: `${r.count}/${resolved.length} הקלטות`,
-        }));
-        const choice = await chooseQualityDialog(options);
-        if (choice === null) {
-          setStatus('🎥 ההורדה בוטלה.');
-          return;
-        }
-        picker = (c) => pickRecordingUrlByLabel(c, choice);
-      }
-      setStatus(`🎥 מתחיל הורדה...`);
-      try {
-        recResults = await downloadResolvedRecordings(
-          resolved, subfolder, picker,
-          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מוריד`),
-        );
-      } catch (e) {
-        setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
-        recResults = [];
-      }
-    } else {
-      setStatus(`🎥 מחלץ קישורי וידאו ל-${recList.length} הקלטות (${recConc} במקביל, איכות: ${quality})...`);
-      try {
-        recResults = await downloadZoomRecordings(
-          recList,
-          (done, total, rec) => setStatus(`🎥 (${done}/${total}) ${rec.topic || rec.url} — מחלץ ומתחיל הורדה`),
-          recConc,
-          subfolder,
-          quality,
-        );
-      } catch (e) {
-        setStatus('🎥 שגיאה בהורדת הקלטות: ' + e.message);
-        recResults = [];
-      }
+    // The signed CloudFront MP4 serves video to fetch() but chrome.downloads
+    // gets an HTML 403 (proven by the diagnostic download-probe). So we hand
+    // each recording to the background worker, which opens the playback page,
+    // captures the signed URL, fetch()es it IN the page (correct cookies/CORS),
+    // and saves it via a blob anchor. Runs in the SW so it survives popup close.
+    // NOTE: 'ask' currently behaves like 'best' on this path (chooser TBD).
+    const dlList = withUrls.map(r => ({ playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4' }));
+    for (const d of dlList) {
+      chrome.runtime.sendMessage({ type: 'mh-download-rec', playUrl: d.playUrl, filename: d.filename, quality });
     }
-    const okR = recResults.filter(r => r.downloadId).length;
-    const failR = recResults.length - okR;
-    if (okR === 0) {
-      const firstErr = recResults.find(r => r.error)?.error || 'סיבה לא ידועה';
-      setStatus(`🎥 אף הקלטה לא ירדה. שגיאה ראשונה: ${firstErr}`);
-    } else {
-      setStatus(`🎥 ${okR}/${recResults.length} הקלטות החלו לרדת${failR ? ` (${failR} נכשלו)` : ''}. ההורדה ממשיכה ברקע — אפשר לסגור את הפופאפ.`);
-    }
-    notify('Moodle Hoarder', `Zoom: ${okR}/${recResults.length} הקלטות וידאו החלו לרדת`);
+    setStatus(`\u{1F3A5} ${dlList.length} הורדות נכנסו לתור ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר שמושך את הוידאו ושומר אותו — לקובץ גדול זה ייקח דקות. תופיע התראה לכל הקלטה כשמסתיים. אל תסגור את הדפדפן עד אז.`);
+    notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
   } finally {
     $('downloadZoomLinks').disabled = false;
     $('downloadZoomVideos').disabled = false;

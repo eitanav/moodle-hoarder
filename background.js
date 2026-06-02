@@ -296,6 +296,156 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// ========== Zoom video download (in-page fetch → blob → anchor) ==========
+// chrome.downloads.download on the signed ssrweb URL returns an HTML 403 (it
+// mangles/strips the CloudFront signature and/or drops the credentialed
+// context), saved as a cancelled .htm. But a plain fetch() of the SAME url
+// returns 206 video/mp4 (proven by the diagnostic download-probe). So we do
+// what real video downloaders do: open the playback page, capture the signed
+// URL, fetch() it INSIDE that page (correct cookies + CORS: the MP4 response
+// carries access-control-allow-origin for the account domain), and save the
+// bytes via a blob + <a download> click. Runs here in the worker so it
+// survives the popup closing; a serial queue keeps one big blob in memory at
+// a time.
+const _mhDlQueue = [];
+let _mhDlBusy = false;
+
+function _mhNotify(message, title) {
+  try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon-128.png', title: title || 'Moodle Hoarder', message }); } catch {}
+}
+
+async function _mhCaptureSignedUrl(tabId, quality) {
+  await chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN',
+    func: () => {
+      if (window.__mhRecInstalled) return;
+      window.__mhRecInstalled = true; window.__mhRecUrls = [];
+      const isSigned = (s) => s && /ssrweb\.zoom\.us/i.test(s) && /\.mp4/i.test(s) && !s.startsWith('blob:');
+      const rem = (s) => { if (isSigned(s) && !window.__mhRecUrls.includes(s)) window.__mhRecUrls.push(s); };
+      const scan = () => { for (const v of document.querySelectorAll('video, source')) rem(v.currentSrc || v.src || v.getAttribute('src')); };
+      new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      scan();
+      const of = window.fetch; window.fetch = function (...a) { rem(typeof a[0] === 'string' ? a[0] : (a[0]?.url || '')); return of.apply(this, a); };
+      const oo = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { rem(u); return oo.apply(this, arguments); };
+    },
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN',
+    func: () => {
+      const sels = ['.play-control', '.zm-control-button-play', 'button.play-button', '[aria-label="Play" i]', '[aria-label="הפעל" i]', '[title="Play" i]', '.center-play-btn', '.vjs-play-control', '.lti-recording-item-play-media', '[class*="play-media"]', 'div[role="button"][aria-label*="play" i]'];
+      for (const s of sels) { const e = document.querySelector(s); if (e && !e.disabled) { try { e.click(); return; } catch {} } }
+      for (const b of document.querySelectorAll('button')) { const t = (b.textContent || '').trim().toLowerCase(); if (t === 'play' || t === 'הפעל') { try { b.click(); return; } catch {} } }
+      for (const v of document.querySelectorAll('video')) { try { v.play?.(); } catch {} }
+    },
+  });
+  let urls = []; const start = Date.now();
+  while (Date.now() - start < 25000) {
+    await new Promise(r => setTimeout(r, 800));
+    try { const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => window.__mhRecUrls || [] }); urls = result || []; } catch {}
+    if (urls.length > 0 && Date.now() - start > 7000) break;
+  }
+  if (!urls.length) return null;
+  const score = (u) => { const m = (u || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i); return m ? (+m[1]) * (+m[2]) : 0; };
+  urls.sort((a, b) => score(b) - score(a));
+  return quality === 'smallest' ? urls[urls.length - 1] : urls[0];
+}
+
+// Wait for a download whose filename matches `stem` to finish (or fail).
+function _mhWaitForDownload(stem, sinceMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; try { chrome.downloads.onChanged.removeListener(onCh); } catch {} resolve(v); } };
+    const base = stem.replace(/\.[^.]+$/, '');
+    const onCh = (delta) => {
+      if (!delta.state) return;
+      chrome.downloads.search({ id: delta.id }, (items) => {
+        const it = items && items[0];
+        if (!it) return;
+        const fn = (it.filename || '').replace(/\\/g, '/').split('/').pop();
+        // Serial queue → only one .mp4 is downloading at a time, so match any
+        // .mp4 (Hebrew filenames can be re-sanitised, so don't rely on `base`).
+        if (!fn || !(/\.mp4$/i.test(fn) || fn.includes(base))) return;
+        if (delta.state.current === 'complete') finish({ ok: true, bytes: it.fileSize });
+        else if (delta.state.current === 'interrupted') finish({ ok: false, error: it.error || 'interrupted' });
+      });
+    };
+    chrome.downloads.onChanged.addListener(onCh);
+    // Safety timeout: 30 min.
+    setTimeout(() => finish({ ok: false, error: 'timeout' }), 30 * 60 * 1000);
+  });
+}
+
+async function _mhDownloadOne(job) {
+  const { playUrl, filename, quality } = job;
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: playUrl, active: false });
+    tabId = tab.id;
+    await new Promise(r => setTimeout(r, 3500));
+    const signed = await _mhCaptureSignedUrl(tabId, quality);
+    if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג)' };
+    const donePromise = _mhWaitForDownload(filename, Date.now());
+    // Fire-and-forget in-page fetch → blob → anchor. The page holds the blob
+    // (Chrome spills large blobs to disk) until the browser finishes saving.
+    await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN', args: [signed, filename],
+      func: (u, fn) => {
+        window.__mhDl = 'fetching';
+        (async () => {
+          try {
+            const r = await fetch(u, { credentials: 'include' });
+            if (!r.ok) { window.__mhDl = 'http_' + r.status; return; }
+            const b = await r.blob();
+            const bu = URL.createObjectURL(b);
+            const a = document.createElement('a');
+            a.href = bu; a.download = fn; document.body.appendChild(a); a.click();
+            window.__mhDl = 'started_' + b.size;
+            setTimeout(() => { try { URL.revokeObjectURL(bu); a.remove(); } catch {} }, 5 * 60 * 1000);
+          } catch (e) { window.__mhDl = 'err_' + (e && e.message || e); }
+        })();
+        return true;
+      },
+    });
+    // Poll the in-page state until the blob is built + click fired (or error).
+    let state = 'fetching'; const t2 = Date.now();
+    while (Date.now() - t2 < 25 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 2000));
+      try { const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => window.__mhDl || '' }); state = result || ''; } catch {}
+      if (state.startsWith('started') || state.startsWith('http_') || state.startsWith('err')) break;
+    }
+    if (!state.startsWith('started')) return { error: 'fetch בדף נכשל: ' + state };
+    // Blob built + download triggered; wait for the browser to finish writing
+    // it to disk before we close the tab (closing revokes the blob).
+    const res = await donePromise;
+    return res.ok ? { ok: true, bytes: res.bytes } : { error: 'הורדה נכשלה: ' + res.error };
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  } finally {
+    if (tabId) { try { await chrome.tabs.remove(tabId); } catch {} }
+  }
+}
+
+async function _mhProcessQueue() {
+  if (_mhDlBusy) return;
+  _mhDlBusy = true;
+  try {
+    while (_mhDlQueue.length) {
+      const job = _mhDlQueue.shift();
+      const res = await _mhDownloadOne(job);
+      if (res.ok) _mhNotify(`✅ ירד: ${job.filename}${res.bytes ? ` (${(res.bytes / 1048576).toFixed(0)}MB)` : ''}`, 'Moodle Hoarder — וידאו');
+      else _mhNotify(`❌ נכשל: ${job.filename} — ${res.error}`, 'Moodle Hoarder — וידאו');
+    }
+  } finally { _mhDlBusy = false; }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type !== 'mh-download-rec' || !msg.playUrl) return;
+  _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', quality: msg.quality || 'best' });
+  _mhProcessQueue();
+  sendResponse?.({ ok: true, queued: _mhDlQueue.length });
+  return true;
+});
+
 function resolveMoodleUrl(url) {
   if (/\/mod\/resource\/view\.php/.test(url)) {
     return url + (url.includes('?') ? '&' : '?') + 'redirect=1';
