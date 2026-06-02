@@ -4,6 +4,26 @@
 
 ---
 
+## v1.31.3 — ✅ אומת: ה-URL מוריד וידאו אמיתי (Referer מיותר)
+
+הרצת 🩺 על 1.31.2 (עם תיקון החיתוך) נתנה את התשובה הסופית — ה-download-probe על ה-URL ה**מלא** (1776 תווים):
+
+```
+withoutReferer: { status: 206, contentType: "video/mp4", isVideo: true }
+withReferer:    { status: 206, contentType: "video/mp4", isVideo: true }
+```
+
+**מסקנות סופיות:**
+1. ה-URL החתום (CloudFront: `data`+`s001`+`s002`+`fid`+`tid`+`Policy`+`Signature`+`Key-Pair-Id`) **מאשר את עצמו** — מחזיר 206 video/mp4 **עם ובלי Referer, עם ובלי cookies**.
+2. **כל תיאוריית ה-Referer הייתה מיותרת.** כל ה-`.htm` בעבר נבעו מ-URL **חתוך/שגוי** שנתפס (החיתוך ל-600/500 תווים מחק את החתימה), לא מהרשאות.
+3. נתיב ההורדה האמיתי (`extractRecordingCandidates`) תופס את ה-URL **המלא** ומעביר אותו ל-`chrome.downloads`. עם ה-URL המלא, התגובה היא `video/mp4` → נשמר כ-`.mp4` תקין.
+
+**מצב:** ההורדה אמורה לעבוד ב-1.31.2+. ממתינים לאישור המשתמש שכפתור 🎥 מוריד MP4 שלם (~1.58GB בהקלטה שנבדקה).
+
+**ניקוי עתידי:** אפשר להסיר את כלל ה-DNR (`ensureZoomReferrerRule`) ואת הרשאת `declarativeNetRequest` — הוכח שהם מיותרים.
+
+---
+
 ## v1.31.2 — באג חיתוך URL פסל את כל אבחוני ה-Referer
 
 ה-🩺 download-probe חשף ש**ה-Referer לא משנה כלום** — גם עם וגם בלי, התקבל 403 זהה. אבל מצאתי למה: ה-monitor שתופס URLs **חתך כל URL ל-600 תווים** (`s.slice(0, 600)`). ה-URL החתום של CloudFront ארוך ~1500–2500 תווים, וה-`Signature`/`Key-Pair-Id` בסוף — החיתוך מחק אותם → 403 AccessDenied **מובטח**. כל ה-probe בדק URL פגום. (נתיב ההורדה האמיתי לא חתך, אבל ה-probe הטעה אותנו לעבר תיאוריית ה-Referer.)
