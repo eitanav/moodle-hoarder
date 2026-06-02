@@ -4,6 +4,16 @@
 
 ---
 
+## v1.32.1 — תיקון: ה-fetch בתוך הדף נחסם ע"י CORS-credentials
+
+ב-1.32.0 ה-fetch בתוך הדף השתמש ב-`credentials: 'include'`. זו בקשה **חוצת-origin** (ariel-ac-il.zoom.us → ssrweb.zoom.us), ועם `include` הדפדפן דורש `access-control-allow-credentials: true` בתגובה — שאינו קיים → **קריאת התגובה נחסמת**, אין blob, ההורדה נכשלת. (ב-probe מהפופאפ זה עבד כי host-permissions עוקפות CORS לגמרי; בדף אין עקיפה.)
+
+**תיקון:** ה-URL החתום מאשר את עצמו ולא צריך cookies → `credentials: 'omit'`. עכשיו קריאת התגובה מותרת (ACAO תואם את ה-origin של הדף עבור בקשה לא-מאומתת).
+
+> הבהרה לגבי מחקר Gemini: הוא עוסק ב**פגישות Zoom חיות** (WebRTC/Canvas/E2EE) ששם רק הקלטת מסך עובדת. המקרה שלנו הוא **הקלטות ענן (VOD)** — MP4 ישיר, וה-probe מוכיח שהוא נתפס ונמשך. אז הגישה שלנו נכונה; אין צורך בהקלטת מסך.
+
+---
+
 ## v1.32.0 — הורדת וידאו דרך fetch בתוך הדף (כמו מורידי הווידאו האמיתיים)
 
 הראיה הסופית מה-🩺 probe: על אותו URL מלא — `fetch()` מחזיר **206 video/mp4**, אבל `chrome.downloads.download()` מחזיר **HTML 403** (נשמר כ-`.htm` מבוטל). כלומר הבעיה **לא** ב-URL ולא ב-Referer — היא ב-`chrome.downloads` עצמו (כנראה מקודד מחדש את ה-URL ומשבש את חתימת CloudFront, או לא שולח את ההקשר המאומת).

@@ -393,7 +393,12 @@ async function _mhDownloadOne(job) {
         window.__mhDl = 'fetching';
         (async () => {
           try {
-            const r = await fetch(u, { credentials: 'include' });
+            // Cross-origin fetch from the zoom page to ssrweb. The signed URL
+            // is self-authorizing, so DON'T send credentials — credentials:
+            // 'include' on a cross-origin request requires the response to
+            // carry access-control-allow-credentials:true (it doesn't), which
+            // blocks reading the body. 'omit' + the URL's signature works.
+            const r = await fetch(u, { credentials: 'omit', cache: 'no-store' });
             if (!r.ok) { window.__mhDl = 'http_' + r.status; return; }
             const b = await r.blob();
             const bu = URL.createObjectURL(b);
