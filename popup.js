@@ -1343,13 +1343,6 @@ $('downloadZoomVideos').addEventListener('click', async () => {
       setStatus('🎥 לא הצלחתי לחלץ קישורי share — אי אפשר להוריד וידאו. נסה שוב או בדוק שאתה מחובר ל-Zoom.');
       return;
     }
-    // Make sure the CDN referer rule is live before any chrome.downloads call,
-    // otherwise ssrweb returns an HTML 403 and we'd save a .htm file. The
-    // referer must be the ACCOUNT domain (e.g. ariel-ac-il.zoom.us), derived
-    // from the resolved share URL — not the generic zoom.us.
-    let _refOrigin = 'https://zoom.us';
-    try { _refOrigin = new URL(withUrls[0].shareUrls[0]).origin; } catch {}
-    await ensureZoomReferrerRule(_refOrigin);
     const quality = $('zoomQuality')?.value || 'best';
     // The signed CloudFront MP4 serves video to fetch() but chrome.downloads
     // gets an HTML 403 (proven by the diagnostic download-probe). So we hand
@@ -1369,51 +1362,6 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     $('backZoom').disabled = false;
   }
 });
-
-// ========== Zoom CDN referer fix ==========
-// Zoom's signed recording URLs on ssrweb.zoom.us are served by a CDN that
-// rejects requests lacking a zoom.us Referer with an HTML 403 page. The
-// player sends that Referer automatically; chrome.downloads.download (and a
-// bare fetch from the extension) does not — so the "download" saves the
-// HTML error page (.htm, "File wasn't available on site"). A dynamic
-// declarativeNetRequest rule re-adds the Referer/Origin for ssrweb requests
-// so downloads (and the diagnostic's probe fetch) get the real bytes.
-const ZOOM_REFERER_RULE_ID = 9011;
-let _zoomRefererCurrent = null;
-// The deep-research network trace proved ssrweb's CDN serves the MP4 only when
-// the request carries Referer of the ACCOUNT domain (e.g. https://ariel-ac-il
-// .zoom.us/), not the generic https://zoom.us/ (that was the v1.28 bug — wrong
-// referer → HTML 403 → .htm file). Derive the origin from the share URL.
-async function ensureZoomReferrerRule(refererOrigin) {
-  const origin = (refererOrigin || 'https://zoom.us').replace(/\/+$/, '');
-  if (_zoomRefererCurrent === origin) return true;
-  if (!chrome.declarativeNetRequest?.updateDynamicRules) return false;
-  try {
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [ZOOM_REFERER_RULE_ID],
-      addRules: [{
-        id: ZOOM_REFERER_RULE_ID,
-        priority: 1,
-        action: {
-          type: 'modifyHeaders',
-          requestHeaders: [
-            { header: 'referer', operation: 'set', value: origin + '/' },
-            { header: 'origin', operation: 'set', value: origin },
-          ],
-        },
-        condition: {
-          urlFilter: '||ssrweb.zoom.us',
-          resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'media', 'other', 'image'],
-        },
-      }],
-    });
-    _zoomRefererCurrent = origin;
-    return true;
-  } catch (e) {
-    console.warn('[MH] failed to install Zoom referer rule:', e);
-    return false;
-  }
-}
 
 // ========== Zoom diagnostic ==========
 // A self-contained, step-by-step tracer for the whole video pipeline.
@@ -1661,26 +1609,22 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
     // .htm "File wasn't available" symptom). This confirms the referer fix.
     if (signed.length) {
       const testUrl = signed[0].url;
-      const doFetch = async () => {
-        try {
-          const r = await fetch(testUrl, { method: 'GET', credentials: 'include', headers: { Range: 'bytes=0-1' } });
-          const ct = r.headers.get('content-type') || '';
-          let bodyStart = '';
-          try { bodyStart = (await r.clone().text()).slice(0, 300); } catch {}
-          const isVideo = /video|octet-stream|mp4/i.test(ct);
-          return { status: r.status, ok: r.ok, contentType: ct, contentLength: r.headers.get('content-length'), isVideo, errorBody: isVideo ? undefined : bodyStart };
-        } catch (e) { return { error: String(e) }; }
-      };
-      onProgress?.('7/7 בדיקת הורדה בלי Referer...');
-      const without = await doFetch();
-      onProgress?.('7/7 בדיקת הורדה עם Referer...');
-      let _ro = 'https://zoom.us';
-      try { _ro = new URL(shareUrls[0]).origin; } catch {}
-      const ruleOk = await ensureZoomReferrerRule(_ro);
-      const withRef = await doFetch();
-      step('download-probe', { urlFull: testUrl, urlLen: testUrl.length, refererRuleInstalled: ruleOk, withoutReferer: without, withReferer: withRef });
-      trace.summary.downloadServesVideo = !!(withRef.ok && withRef.isVideo);
-      trace.summary.refererFixedIt = !!(without.error || !without.isVideo) && trace.summary.downloadServesVideo;
+      // The signed URL is self-authorizing (referer/cookies irrelevant — both
+      // were proven equal in earlier traces). One fetch tells us if the full
+      // URL serves video. credentials:'include' is fine here: the probe runs
+      // in the popup, where host_permissions bypass CORS entirely.
+      onProgress?.('7/7 בדיקת הורדה (fetch על ה-URL המלא)...');
+      let probe;
+      try {
+        const r = await fetch(testUrl, { method: 'GET', credentials: 'include', headers: { Range: 'bytes=0-1' } });
+        const ct = r.headers.get('content-type') || '';
+        let bodyStart = '';
+        try { bodyStart = (await r.clone().text()).slice(0, 300); } catch {}
+        const isVideo = /video|octet-stream|mp4/i.test(ct);
+        probe = { status: r.status, ok: r.ok, contentType: ct, contentLength: r.headers.get('content-length'), isVideo, errorBody: isVideo ? undefined : bodyStart };
+      } catch (e) { probe = { error: String(e) }; }
+      step('download-probe', { urlFull: testUrl, urlLen: testUrl.length, result: probe });
+      trace.summary.downloadServesVideo = !!(probe.ok && probe.isVideo);
     }
   } else {
     step('player-network-probe', { skipped: 'no share URL to probe' });
@@ -1705,11 +1649,9 @@ async function runZoomVideoDiagnostic(tabId, onProgress) {
       ? 'הקישור נחלץ, אך הנגן משתמש ב-HLS (m3u8) ולא ב-MP4 ישיר — צריך לוגיקת הורדה אחרת. ראה player-network-probe.classification.'
       : 'הקישור נחלץ אך לא נתפס signed MP4 מ-ssrweb. ייתכן שהנגן לא נטען בטאב רקע, ה-URL פג, או שהפורמט השתנה. ראה player-network-probe.allUrls.';
   } else if (s.downloadServesVideo === false) {
-    verdict = 'נמצא signed MP4, אבל fetch ל-URL המלא (עם cookies) לא מחזיר וידאו. ראה download-probe.withReferer.errorBody — הוא מכיל את הודעת השגיאה המדויקת של S3/CloudFront (AccessDenied / Missing Key-Pair-Id / Request has expired). זה יגיד אם חסר חלק מה-URL, אם פג, או אם צריך להביא מהקשר הדף.';
-  } else if (s.refererFixedIt) {
-    verdict = '✅ אובחן ותוקן: בלי Referer ה-CDN מחזיר HTML (שזה היה הבאג), ועם כלל ה-Referer מתקבל וידאו אמיתי. ההורדה אמורה לעבוד עכשיו (v1.28.0 מוסיף את ה-Referer אוטומטית). נסה 🎥.';
+    verdict = 'נמצא signed MP4, אבל fetch ל-URL המלא לא מחזיר וידאו. ראה download-probe.result.errorBody — הוא מכיל את הודעת השגיאה המדויקת של S3/CloudFront (AccessDenied / Missing Key-Pair-Id / Request has expired). זה יגיד אם חסר חלק מה-URL, אם פג, או אם צריך להביא מהקשר הדף.';
   } else if (s.downloadServesVideo) {
-    verdict = '✅ הכל תקין: טבלה ✓, קליק ✓, דף פרטים ✓, קישור share ✓, signed MP4 ✓, וההורדה מחזירה וידאו אמיתי ✓. 🎥 אמור לעבוד. אם לא — סרוק מחדש סמוך ללחיצה (URLs פגים תוך ~שעתיים).';
+    verdict = '✅ הכל תקין: טבלה ✓, קליק ✓, דף פרטים ✓, קישור share ✓, signed MP4 ✓, וה-fetch על ה-URL המלא מחזיר וידאו ✓. 🎥 מוריד דרך fetch-בדף → blob (background worker). אם לא ירד — בדוק את ה-Console של ה-service worker.';
   } else {
     verdict = 'נמצא signed MP4 אך בדיקת ההורדה לא הושלמה. ראה download-probe / player-network-probe לפרטים.';
   }
@@ -2006,268 +1948,11 @@ async function extractOneTranscript(rec) {
 // Build a friendly filename stem for one recording. Uses the topic and
 // a normalised date (YYYY-MM-DD_HH-MM) when parseable, falling back to
 // a sanitised version of whatever Zoom gave us.
-// ========== Recording video download (v1.24) ==========
-// Confirmed via Phase 0 debug: Ariel's Zoom serves recordings as direct
-// signed MP4 URLs on ssrweb.zoom.us, set as the <video> element's src.
-// No HLS, no DRM, no MSE. The signed URL carries its own CloudFront
-// signature so it works standalone — we hand it straight to
-// chrome.downloads.download, which streams to disk in the browser
-// process (survives popup close, no memory pressure).
-//
-// Parse a resolution score from an ssrweb URL filename like
-// "...Recording_1366x768.mp4" → 1366*768. Returns 0 if not parseable.
-function _resolutionScore(url) {
-  const m = (url || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i);
-  if (m) return (+m[1]) * (+m[2]);
-  return 0;
-}
-function _resolutionLabel(url) {
-  const m = (url || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i);
-  return m ? `${m[1]}x${m[2]}` : 'unknown';
-}
-
-// extractRecordingCandidates opens the playback page in a hidden tab,
-// installs a monitor that records EVERY ssrweb signed MP4 URL (via a
-// MutationObserver on <video> src + a fetch/XHR patch — the proven
-// approach from the debug capture), clicks Play, and polls until at
-// least one signed URL appears. Returns an array of unique signed MP4
-// URLs (may be >1 if the recording has multiple resolutions/views).
-async function extractRecordingCandidates(rec) {
-  let tab = null;
-  const INITIAL_SETTLE = 3500;
-  const HARD_TIMEOUT_MS = 25000;
-  try {
-    tab = await chrome.tabs.create({ url: rec.url, active: false });
-    await new Promise(r => setTimeout(r, INITIAL_SETTLE));
-    // Install the monitor BEFORE clicking play, so we don't miss the URL.
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: () => {
-        if (window.__mhRecInstalled) return;
-        window.__mhRecInstalled = true;
-        window.__mhRecUrls = [];
-        const isSigned = (s) => s && /ssrweb\.zoom\.us/i.test(s) && /\.mp4/i.test(s) && !s.startsWith('blob:');
-        const remember = (s) => { if (isSigned(s) && !window.__mhRecUrls.includes(s)) window.__mhRecUrls.push(s); };
-        // 1) MutationObserver on <video>/<source> src (proven in debug)
-        const scan = () => {
-          for (const v of document.querySelectorAll('video, source')) {
-            remember(v.currentSrc || v.src || v.getAttribute('src'));
-          }
-        };
-        const obs = new MutationObserver(scan);
-        obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-        scan();
-        // 2) fetch + XHR patch — catches the signed URL even if the player
-        //    fetches it as a blob source.
-        const of = window.fetch;
-        window.fetch = function (...a) {
-          const u = (typeof a[0] === 'string') ? a[0] : (a[0]?.url || '');
-          remember(u);
-          return of.apply(this, a);
-        };
-        const oo = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function (m, u) { remember(u); return oo.apply(this, arguments); };
-      },
-    });
-    // Click Play to trigger the signed URL handshake.
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: () => {
-        const candidates = [
-          '.play-control', '.zm-control-button-play', 'button.play-button',
-          '[aria-label="Play" i]', '[aria-label="הפעל" i]', '[title="Play" i]',
-          'button[data-tracking-id*="play" i]', '.center-play-btn',
-          '.vjs-play-control', 'div[role="button"][aria-label*="play" i]',
-        ];
-        for (const sel of candidates) {
-          const el = document.querySelector(sel);
-          if (el && !el.disabled) { try { el.click(); return; } catch {} }
-        }
-        for (const b of document.querySelectorAll('button')) {
-          const tx = (b.textContent || '').trim().toLowerCase();
-          if (tx === 'play' || tx === 'הפעל') { try { b.click(); return; } catch {} }
-        }
-      },
-    });
-    // Poll for captured signed URLs.
-    const start = Date.now();
-    let urls = [];
-    while (Date.now() - start < HARD_TIMEOUT_MS) {
-      await new Promise(r => setTimeout(r, 700));
-      try {
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          world: 'MAIN',
-          func: () => window.__mhRecUrls || [],
-        });
-        urls = result || [];
-      } catch {}
-      // Give it a moment to collect multiple resolutions, but bail once we
-      // have at least one and 3s have passed (most have a single source).
-      if (urls.length > 0 && Date.now() - start > INITIAL_SETTLE + 4000) break;
-    }
-    return urls;
-  } catch (e) {
-    return [];
-  } finally {
-    if (tab?.id) {
-      try { await chrome.tabs.remove(tab.id); } catch {}
-    }
-  }
-}
-
-// Picks one URL from candidates per the quality preference.
-//   'best'     → highest resolution
-//   'smallest' → lowest resolution
-// ('ask' is handled separately by the popup, which resolves candidates
-//  first, shows a chooser, then picks by the user's chosen label.)
-function pickRecordingUrl(candidates, quality) {
-  if (!candidates || candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-  const sorted = [...candidates].sort((a, b) => _resolutionScore(b) - _resolutionScore(a));
-  if (quality === 'smallest') return sorted[sorted.length - 1];
-  return sorted[0]; // 'best' defaults to highest
-}
-
-// Score a "WxH" resolution label (e.g. "1366x768") to a pixel count.
-function _labelScore(label) {
-  const m = (label || '').match(/(\d{3,4})x(\d{3,4})/);
-  return m ? (+m[1]) * (+m[2]) : 0;
-}
-
-// Picks the candidate whose resolution matches a label the user chose in
-// the 'ask' dialog. Falls back to the closest available resolution when a
-// given recording doesn't carry that exact one (recordings can differ).
-function pickRecordingUrlByLabel(candidates, label) {
-  if (!candidates || candidates.length === 0) return null;
-  const exact = candidates.find(c => _resolutionLabel(c) === label);
-  if (exact) return exact;
-  const target = _labelScore(label);
-  if (!target) return pickRecordingUrl(candidates, 'best');
-  return [...candidates].sort(
-    (a, b) => Math.abs(_resolutionScore(a) - target) - Math.abs(_resolutionScore(b) - target),
-  )[0];
-}
-
-// Phase 1 — resolve the signed MP4 candidates for every recording, in a
-// parallel pool. Returns [{ recording, candidates }]. Slow (each opens a
-// hidden tab + plays); separated from the download so 'ask' can show a
-// chooser in between WITHOUT re-extracting (signed URLs expire in ~2h, and
-// re-running would double the wait).
-async function resolveRecordingCandidates(recordings, onProgress, concurrency) {
-  const out = new Array(recordings.length);
-  let nextIdx = 0;
-  let doneCount = 0;
-  const C = Math.max(1, Math.min(concurrency || 2, recordings.length));
-  async function worker() {
-    while (true) {
-      const myIdx = nextIdx++;
-      if (myIdx >= recordings.length) return;
-      const rec = recordings[myIdx];
-      let candidates = [];
-      try { candidates = await extractRecordingCandidates(rec); } catch {}
-      out[myIdx] = { recording: rec, candidates };
-      doneCount++;
-      try { onProgress?.(doneCount, recordings.length, rec); } catch {}
-    }
-  }
-  await Promise.all(Array.from({ length: C }, worker));
-  return out;
-}
-
-// Build the set of distinct resolutions available across resolved
-// recordings, highest first. Returns [{ label, score, count }] where count
-// is how many recordings offer that resolution.
-function summariseResolutions(resolved) {
-  const map = new Map();
-  for (const r of resolved) {
-    for (const c of (r.candidates || [])) {
-      const label = _resolutionLabel(c);
-      const cur = map.get(label) || { label, score: _resolutionScore(c), count: 0 };
-      cur.count++;
-      map.set(label, cur);
-    }
-  }
-  return [...map.values()].sort((a, b) => b.score - a.score);
-}
-
-// Phase 2 — hand each resolved recording's chosen URL to
-// chrome.downloads.download (browser process → survives popup close).
-// `picker(candidates) → url|null`. Returns the summary array of
-// { recording, url?, resolution?, downloadId?, error? }.
-async function downloadResolvedRecordings(resolved, subfolder, picker, onProgress) {
-  const out = [];
-  let done = 0;
-  for (const { recording, candidates } of resolved) {
-    try {
-      const url = picker(candidates);
-      if (!url) {
-        out.push({ recording, error: 'לא נתפס קישור וידאו (הנגן אולי לא נטען או אין הקלטה זמינה)' });
-      } else {
-        const stem = transcriptFileStem(recording);
-        const fname = `${stem}.mp4`;
-        const filename = subfolder ? `${subfolder}/${fname}` : fname;
-        const downloadId = await chrome.downloads.download({ url, filename, saveAs: false });
-        out.push({ recording, url, resolution: _resolutionLabel(url), downloadId, candidateCount: candidates.length });
-      }
-    } catch (e) {
-      out.push({ recording, error: String(e) });
-    }
-    done++;
-    try { onProgress?.(done, resolved.length, recording); } catch {}
-  }
-  return out;
-}
-
-// Convenience wrapper for the non-interactive 'best'/'smallest' paths:
-// resolve then download in one go.
-async function downloadZoomRecordings(recordings, onProgress, concurrency, subfolder, quality) {
-  const resolved = await resolveRecordingCandidates(recordings, onProgress, concurrency);
-  return downloadResolvedRecordings(resolved, subfolder, (c) => pickRecordingUrl(c, quality));
-}
-
-// In-popup modal that asks the user which resolution they want. `options`
-// is [{ label, value, sub }]. Resolves to the chosen `value`, or null if
-// the user cancels (Cancel button / Esc / backdrop click).
-function chooseQualityDialog(options) {
-  return new Promise((resolve) => {
-    const overlay = $('qualityOverlay');
-    const body = $('qualityOptions');
-    if (!overlay || !body) { resolve(null); return; }
-    body.innerHTML = '';
-    let settled = false;
-    const done = (val) => {
-      if (settled) return;
-      settled = true;
-      overlay.hidden = true;
-      body.innerHTML = '';
-      document.removeEventListener('keydown', onKey);
-      resolve(val);
-    };
-    const onKey = (e) => { if (e.key === 'Escape') done(null); };
-    for (const opt of options) {
-      const b = document.createElement('button');
-      b.className = 'mh-q-btn';
-      const main = document.createElement('span');
-      main.textContent = opt.label;
-      b.appendChild(main);
-      if (opt.sub) {
-        const sub = document.createElement('span');
-        sub.className = 'mh-q-sub';
-        sub.textContent = opt.sub;
-        b.appendChild(sub);
-      }
-      b.addEventListener('click', () => done(opt.value));
-      body.appendChild(b);
-    }
-    $('qualityCancel').onclick = () => done(null);
-    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
-    document.addEventListener('keydown', onKey);
-    overlay.hidden = false;
-  });
-}
+// ========== Recording video download ==========
+// The signed ssrweb MP4 is fetched IN the zoom page and saved via a blob
+// anchor by the background service worker (see background.js mh-download-rec).
+// The old popup-side chrome.downloads path + ask-quality chooser were removed
+// in v1.32.2 — chrome.downloads.download mangled the signed URL (HTML 403).
 
 function transcriptFileStem(rec) {
   const topic = sanitizeFilename(rec.topic || '') || 'recording';
