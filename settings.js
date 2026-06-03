@@ -68,6 +68,16 @@ const SETTINGS_DEFAULTS = {
   // still opt in; we just unselect them by default in the picker.
   maxFileSizeMB: 0,
 
+  // Rename PDFs by their embedded title (ROADMAP #21). When true, any
+  // downloaded PDF whose filename looks generic (e.g. "1.pdf",
+  // "document.pdf", "scan0001.pdf", a long hex hash, our own
+  // "resource_<id>") is renamed to the PDF's own /Title metadata when one
+  // exists. No AI and no heavy library: we parse the PDF's Info /Title and
+  // XMP dc:title directly from the bytes. Files with a real, meaningful
+  // name are left untouched. Default OFF — it changes filenames, so it's
+  // opt-in.
+  renamePdfByTitle: false,
+
   // UI language (ROADMAP #16). 'auto' = follow the open Moodle course's
   // <html lang> (falls back to navigator.language and finally Hebrew).
   // 'he' or 'en' = force.

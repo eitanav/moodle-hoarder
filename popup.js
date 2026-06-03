@@ -2788,6 +2788,16 @@ function isStreamingUrl(u) {
 }
 
 async function fetchItem(item) {
+  const results = await fetchItemRaw(item);
+  // ROADMAP #21 — rename generically-named PDFs to their embedded title.
+  // Opt-in; only touches { path, blob } results (skips links/recordings/events).
+  if (!CACHED_SETTINGS?.renamePdfByTitle || !Array.isArray(results)) return results;
+  const out = [];
+  for (const r of results) out.push(await maybeRenamePdf(r));
+  return out;
+}
+
+async function fetchItemRaw(item) {
   switch (item.type) {
     case 'resource': return await fetchResource(item);
     case 'folder':   return await fetchFolder(item);
@@ -3604,6 +3614,219 @@ function sanitizeFilename(name) {
     .trim()
     .slice(0, 120);
 }
+// ===================== PDF rename by title (ROADMAP #21) =====================
+// When the "rename PDFs by title" setting is on, a downloaded PDF whose
+// filename is generic (1.pdf, document.pdf, scan0001.pdf, a hex hash, our own
+// resource_<id> fallback) is renamed to the title baked into the PDF itself.
+// No pdf.js and no AI: we read the Info dictionary's /Title and the XMP
+// dc:title straight from the bytes. Best-effort — encrypted PDFs, or titles
+// that live only inside a compressed object stream, won't be found, and that's
+// fine: we just keep the original name. Files with a meaningful name are never
+// touched.
+
+// Generic, low-information base names (extension already stripped) worth
+// replacing. Matched case-insensitively against the normalised base name.
+const GENERIC_NAME_WORDS = [
+  'document', 'documents', 'doc', 'docs', 'file', 'files', 'download',
+  'downloads', 'unnamed', 'untitled', 'noname', 'no name', 'attachment',
+  'resource', 'scan', 'scanned', 'image', 'img', 'output', 'print',
+  'printout', 'pdf', 'new', 'temp', 'tmp', 'copy', 'final', 'draft',
+  'מסמך', 'קובץ', 'ללא שם', 'הורדה', 'סריקה', 'מצורף', 'עותק', 'חדש',
+];
+
+// Bidi/zero-width characters that wreck both filenames and regex matching.
+const BIDI_RE = /[​-‏‪-‮⁦-⁩﻿]/g;
+
+// True if `base` (a filename without extension) carries no real information.
+function isGenericName(base) {
+  if (!base) return true;
+  const s = String(base).replace(BIDI_RE, '').trim().toLowerCase();
+  if (!s) return true;
+  if (s.length < 3) return true;                       // "a", "01"
+  if (/^[\d._\-\s()]+$/.test(s)) return true;          // only digits/punctuation
+  if (/^[0-9a-f]{16,}$/.test(s)) return true;          // md5/sha-ish hash
+  if (/^(resource|folder|file)_\d+$/.test(s)) return true; // our own fallback
+  const norm = s.replace(/[\s_\-()]+/g, ' ').trim();
+  if (GENERIC_NAME_WORDS.includes(norm)) return true;
+  if (GENERIC_NAME_WORDS.includes(norm.replace(/\s*\d+$/, '').trim())) return true; // "scan 0001"
+  const glued = s.replace(/[\s_\-()]/g, '').replace(/\d+$/, '');                    // "scan0001"
+  if (GENERIC_NAME_WORDS.includes(glued)) return true;
+  if (/^copy of /.test(norm)) return true;
+  return false;
+}
+
+// Build a Latin1 string aligned 1:1 with the bytes (so string offsets equal
+// byte offsets — handy for recovering UTF-8/UTF-16 slices later).
+function bytesToLatin1(bytes) {
+  let s = '';
+  const CHUNK = 32768;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return s;
+}
+
+// Decode a PDF string's raw bytes, honouring the byte-order mark PDF uses for
+// Unicode (UTF-16BE with a leading FEFF). Without a BOM, PDFDocEncoding ≈
+// Latin1 for the ASCII range; Hebrew titles practically always use UTF-16BE,
+// so Latin1 is the safe default and isUsableTitle() rejects any garbage.
+function decodePdfStringBytes(b) {
+  try {
+    if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(b.subarray(2));
+    if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(b.subarray(2));
+    if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return new TextDecoder('utf-8').decode(b.subarray(3));
+    return new TextDecoder('latin1').decode(b);
+  } catch { return ''; }
+}
+
+// Parse a PDF literal string `( ... )` starting at the opening paren (a byte
+// index). Handles nested parens, backslash escapes, octal codes and line
+// continuations, per the PDF spec.
+function decodePdfLiteral(bytes, openIdx) {
+  const out = [];
+  let depth = 0;
+  for (let i = openIdx; i < bytes.length; i++) {
+    const c = bytes[i];
+    if (c === 0x5c) { // backslash escape
+      const n = bytes[i + 1]; i++;
+      switch (n) {
+        case 0x6e: out.push(0x0a); break;       // \n
+        case 0x72: out.push(0x0d); break;       // \r
+        case 0x74: out.push(0x09); break;       // \t
+        case 0x62: out.push(0x08); break;       // \b
+        case 0x66: out.push(0x0c); break;       // \f
+        case 0x28: out.push(0x28); break;       // \(
+        case 0x29: out.push(0x29); break;       // \)
+        case 0x5c: out.push(0x5c); break;       // \\
+        case 0x0d: if (bytes[i + 1] === 0x0a) i++; break; // \<CRLF> line continuation
+        case 0x0a: break;                       // \<LF> line continuation
+        default:
+          if (n >= 0x30 && n <= 0x37) {         // \ddd octal (1-3 digits)
+            let oct = '', k = i;
+            while (k < bytes.length && oct.length < 3 && bytes[k] >= 0x30 && bytes[k] <= 0x37) { oct += String.fromCharCode(bytes[k]); k++; }
+            out.push(parseInt(oct, 8) & 0xff);
+            i = k - 1;
+          } else { out.push(n); }
+      }
+      continue;
+    }
+    if (c === 0x28) { if (depth > 0) out.push(c); depth++; continue; } // (
+    if (c === 0x29) { depth--; if (depth === 0) break; out.push(c); continue; } // )
+    if (depth > 0) out.push(c);
+  }
+  return decodePdfStringBytes(new Uint8Array(out));
+}
+
+// Parse a PDF hex string `< ... >` (s is the Latin1 view, openIdx the '<').
+function decodePdfHex(s, openIdx) {
+  const end = s.indexOf('>', openIdx);
+  if (end < 0) return '';
+  const hex = s.slice(openIdx + 1, end).replace(/[^0-9a-fA-F]/g, '');
+  const padded = hex.length % 2 ? hex + '0' : hex;
+  const out = new Uint8Array(padded.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(padded.substr(i * 2, 2), 16);
+  return decodePdfStringBytes(out);
+}
+
+function decodeXmlEntities(s) {
+  return String(s)
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+    .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(+d); } catch { return ''; } })
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// Pull /Title from the Info dictionary (first usable match).
+function pdfTitleFromInfo(bytes, s) {
+  let from = 0;
+  while (true) {
+    const idx = s.indexOf('/Title', from);
+    if (idx < 0) return '';
+    let j = idx + 6;
+    while (j < s.length && /\s/.test(s[j])) j++;
+    let val = '';
+    if (s[j] === '(') val = decodePdfLiteral(bytes, j);
+    else if (s[j] === '<') val = decodePdfHex(s, j);
+    if (val && isUsableTitle(val)) return val;
+    from = idx + 6;
+  }
+}
+
+// Pull dc:title from the XMP metadata stream (UTF-8 text).
+function pdfTitleFromXmp(bytes, s) {
+  const m = s.match(/<dc:title>[\s\S]*?<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/i)
+        || s.match(/<dc:title>\s*([^<]+?)\s*<\/dc:title>/i);
+  if (!m || !m[1]) return '';
+  const rel = m[0].indexOf(m[1]);
+  if (rel < 0) return '';
+  const start = m.index + rel;
+  const txt = new TextDecoder('utf-8').decode(bytes.subarray(start, start + m[1].length));
+  return decodeXmlEntities(txt);
+}
+
+// True if a candidate title is worth using as a filename.
+function isUsableTitle(t) {
+  if (!t) return false;
+  const s = String(t)
+    .replace(/[ -]/g, ' ')
+    .replace(BIDI_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (s.length < 3 || s.length > 200) return false;
+  if (!/[A-Za-z֐-׿]/.test(s)) return false;          // needs a real letter
+  if (/^https?:\/\//i.test(s)) return false;                   // a URL, not a title
+  if (/\.(pdf|docx?|pptx?|indd|tex|qxd)$/i.test(s)) return false; // just a filename
+  if (/^(microsoft word|powerpoint|untitled|slide \d+)/i.test(s)) return false; // producer junk
+  if (isGenericName(s)) return false;
+  return true;
+}
+
+// Extract a usable title from PDF bytes — Info /Title first, then XMP.
+function extractPdfTitle(bytes) {
+  try {
+    const s = bytesToLatin1(bytes);
+    const info = pdfTitleFromInfo(bytes, s);
+    if (info) return info.replace(/\s+/g, ' ').trim();
+    const xmp = pdfTitleFromXmp(bytes, s);
+    if (xmp && isUsableTitle(xmp)) return xmp.replace(/\s+/g, ' ').trim();
+  } catch {}
+  return '';
+}
+
+// If `result` is a generically-named PDF, try renaming it to its title.
+// Never throws and never blocks the download — on any failure it returns the
+// result unchanged.
+async function maybeRenamePdf(result) {
+  if (!result || !result.blob || !result.path) return result;
+  const slash = result.path.lastIndexOf('/');
+  const dir  = slash >= 0 ? result.path.slice(0, slash + 1) : '';
+  const file = slash >= 0 ? result.path.slice(slash + 1) : result.path;
+  if (!/\.pdf$/i.test(file)) return result;
+  if (!isGenericName(file.replace(/\.pdf$/i, ''))) return result; // already meaningful
+  try {
+    // Metadata lives near the start (XMP) or the end (Info/xref). For large
+    // files, scan just the two ends to avoid buffering hundreds of MB.
+    const FULL_CAP = 12 * 1024 * 1024, EDGE = 2 * 1024 * 1024;
+    let title = '';
+    if (result.blob.size > FULL_CAP) {
+      const head = new Uint8Array(await result.blob.slice(0, EDGE).arrayBuffer());
+      title = extractPdfTitle(head);
+      if (!title) {
+        const tail = new Uint8Array(await result.blob.slice(result.blob.size - EDGE).arrayBuffer());
+        title = extractPdfTitle(tail);
+      }
+    } else {
+      title = extractPdfTitle(new Uint8Array(await result.blob.arrayBuffer()));
+    }
+    if (!title) return result;
+    const clean = sanitizeFilename(title);
+    if (!clean || `${clean}.pdf`.toLowerCase() === file.toLowerCase()) return result;
+    return { ...result, path: `${dir}${clean}.pdf` };
+  } catch {
+    return result;
+  }
+}
+
 function uniquePath(used, path) {
   if (!used.has(path)) { used.add(path); return path; }
   const dot = path.lastIndexOf('.');
