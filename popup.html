@@ -522,8 +522,9 @@
   <div id="status"></div>
   <div id="log"></div>
 
-  <!-- Quality chooser modal (used by 🎥 video download when איכות = "שאל אותי").
-       Populated and shown by chooseQualityDialog() in popup.js. -->
+  <!-- Quality chooser modal — reserved for the 🎥 "שאל אותי" flow on the
+       background-worker download path (chooser to be re-wired; currently
+       'ask' behaves like 'best'). Hidden/unused until then. -->
   <div id="qualityOverlay" class="mh-overlay" hidden>
     <div class="mh-modal" role="dialog" aria-modal="true" aria-label="בחר איכות וידאו">
       <div class="mh-modal-title">בחר איכות וידאו</div>

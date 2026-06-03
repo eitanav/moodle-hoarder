@@ -4,6 +4,25 @@
 
 ---
 
+## v1.32.2 — ניקוי: הסרת קוד מת + ה-DNR/Referer המיותר
+
+לאחר המעבר להורדה דרך ה-background worker, נשאר הרבה קוד יתום וגם מנגנון Referer שהוכח מיותר. ניקיתי (בלי לשנות התנהגות של נתיבים חיים; אומת ב-`node --check` + בדיקת אפס-הפניות):
+
+### הוסר
+- **כל מנגנון ה-Referer/DNR** — `ensureZoomReferrerRule`, הכלל הדינמי, והרשאת `declarativeNetRequest`. הוכח (download-probe) ש-Referer לא רלוונטי: ה-URL החתום מאשר את עצמו. בונוס: מונע הפרעה אפשרית ל-fetch בתוך הדף.
+- **~263 שורות קוד מת בפופאפ** — נתיב ההורדה הישן (`downloadZoomRecordings`, `extractRecordingCandidates`, `resolveRecordingCandidates`, `downloadResolvedRecordings`) ומנגנון בורר האיכות (`summariseResolutions`, `chooseQualityDialog`, `pickRecordingUrlByLabel`, `pickRecordingUrl`, `_resolutionScore`, `_resolutionLabel`). הכל הוחלף ע"י נתיב ה-fetch-בדף ב-background.
+- ה-download-probe בדיאגנוסטיקה פושט ל-fetch בודד (בלי ריקוד with/without referer).
+
+### נשאר (במכוון)
+- הרשאת `debugger` — נחוצה ל-🔬 מחקר עמוק.
+- ה-modal של בורר האיכות (HTML) — שמור לשִחזור 'שאל אותי' בנתיב ה-SW.
+
+### עדיין פתוח
+- אימות שכפתור 🎥 אכן מוריד MP4 (טרם נבדק).
+- 'שאל אותי' מתנהג כמו 'הטובה ביותר'; תת-תיקייה לא נתמכת בנתיב ה-anchor.
+
+---
+
 ## v1.32.1 — תיקון: ה-fetch בתוך הדף נחסם ע"י CORS-credentials
 
 ב-1.32.0 ה-fetch בתוך הדף השתמש ב-`credentials: 'include'`. זו בקשה **חוצת-origin** (ariel-ac-il.zoom.us → ssrweb.zoom.us), ועם `include` הדפדפן דורש `access-control-allow-credentials: true` בתגובה — שאינו קיים → **קריאת התגובה נחסמת**, אין blob, ההורדה נכשלת. (ב-probe מהפופאפ זה עבד כי host-permissions עוקפות CORS לגמרי; בדף אין עקיפה.)
