@@ -322,47 +322,6 @@ document.getElementById('downloadQueue')?.addEventListener('click', async () => 
   document.getElementById('downloadQueue').disabled = false;
 });
 
-// ---------- Standalone VTT→TXT converter ----------
-// Lets the user drop one or more .vtt files in and get cleaned .txt
-// downloads. Reuses vttToCleanText so the formatting matches what we
-// produce inside the Zoom flow. Useful for VTTs from other sources
-// (downloaded straight from Zoom, archived from earlier runs, etc.).
-document.getElementById('vttFile')?.addEventListener('change', async (e) => {
-  const files = [...(e.target.files || [])];
-  if (!files.length) return;
-  const btn = document.getElementById('vttConvertBtn');
-  const originalLabel = btn?.textContent;
-  let done = 0;
-  for (const file of files) {
-    if (btn) btn.textContent = `🔄 ממיר (${done + 1}/${files.length}) ${file.name}…`;
-    try {
-      const vtt = await file.text();
-      if (!vtt.includes('WEBVTT')) {
-        logLine(`✗ ${file.name}: לא נראה כמו קובץ VTT (אין WEBVTT header)`, 'err');
-        continue;
-      }
-      const txt = vttToCleanText(vtt);
-      // Strip the .vtt extension if present, then add .txt
-      const stem = file.name.replace(/\.vtt$/i, '');
-      const outName = `${sanitizeFilename(stem) || 'transcript'}.txt`;
-      const blob = new Blob(['﻿' + txt], { type: 'text/plain;charset=utf-8' });
-      await chrome.downloads.download({
-        url: URL.createObjectURL(blob),
-        filename: outName,
-        saveAs: false,
-      });
-      logLine(`✓ ${outName} (${(txt.length / 1024).toFixed(1)}KB)`, 'ok');
-    } catch (err) {
-      logLine(`✗ ${file.name}: ${err.message}`, 'err');
-    }
-    done++;
-  }
-  if (btn) btn.textContent = originalLabel || '🔄 המר קובץ VTT לטקסט נקי';
-  // Reset the input so the same file can be reselected after a fix.
-  e.target.value = '';
-  setStatus(`✅ ${done} קבצים הומרו.`);
-});
-
 // ---------- Initial: scan button ----------
 function setSkeleton(show) {
   const el = document.getElementById('skeleton');
@@ -1373,20 +1332,20 @@ $('downloadZoomVideos').addEventListener('click', async () => {
       setStatus('🎥 לא הצלחתי לחלץ קישורי share — אי אפשר להוריד וידאו. נסה שוב או בדוק שאתה מחובר ל-Zoom.');
       return;
     }
-    const quality = $('zoomQuality')?.value || 'best';
     // The signed CloudFront MP4 serves video to fetch() but chrome.downloads
     // gets an HTML 403 (proven by the diagnostic download-probe). So we hand
     // each recording to the background worker, which opens the playback page,
     // captures the signed URL, fetch()es it IN the page (correct cookies/CORS),
     // and saves it via a blob anchor. Runs in the SW so it survives popup close.
-    // NOTE: 'ask' currently behaves like 'best' on this path (chooser TBD).
+    // V2 intentionally exposes no quality chooser: Zoom often provides only one
+    // downloadable MP4, so we always request the best candidate it exposes.
     const dlList = withUrls.map(r => ({
       playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4', topic: r.topic || '', date: r.date || '',
     }));
     setProgress(0, dlList.length);
     const title = zoomHistoryTitle(withUrls);
     chrome.runtime.sendMessage({
-      type: 'mh-download-recs', jobs: dlList, quality, courseName: title, sourceUrl: zoomScanned.data?.pageUrl || '',
+      type: 'mh-download-recs', jobs: dlList, courseName: title, sourceUrl: zoomScanned.data?.pageUrl || '',
     });
     setStatus(`🎥 ${dlList.length} הורדות נכנסו לתור. ההורדה רצה ברקע אחת בכל פעם — אפשר לסגור את הפופאפ.`);
     notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
@@ -1990,7 +1949,7 @@ async function extractOneTranscript(rec) {
 // ========== Recording video download ==========
 // The signed ssrweb MP4 is fetched IN the zoom page and saved via a blob
 // anchor by the background service worker (see background.js mh-download-rec).
-// The old popup-side chrome.downloads path + ask-quality chooser were removed
+// The old popup-side chrome.downloads path + quality chooser was removed
 // in v1.32.2 — chrome.downloads.download mangled the signed URL (HTML 403).
 
 function transcriptFileStem(rec) {
