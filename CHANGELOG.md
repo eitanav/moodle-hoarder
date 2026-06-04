@@ -4,6 +4,28 @@
 
 ---
 
+## v1.32.3 — הורדה דרך offscreen document (עוקף את חסם ה-CORS)
+
+הורדת ה-fetch-בדף (1.32.1/1.32.2) הורידה כלום. הסיבה: ה-`fetch` רץ **בתוך דף ה-Zoom** (דף web רגיל) → כפוף ל-CORS, וכנראה נחסם. ה-download-probe עבד כי הוא רץ ב**הקשר התוסף** (popup), שם `host_permissions` עוקפות CORS לגמרי.
+
+**התיקון:** מעבירים את ה-fetch ל-**offscreen document** — דף נסתר ב-origin של התוסף, עם host_permissions, **בדיוק ההקשר שבו ה-probe החזיר 206 video**. אין CORS, אין referer, אין cookies-issues.
+
+### הזרימה החדשה (background.js + offscreen.js)
+1. ה-worker פותח את דף ההשמעה בטאב נסתר, תופס את ה-signed URL, וסוגר את הטאב.
+2. יוצר offscreen document (פעם אחת), שולח לו את ה-URL.
+3. ה-offscreen עושה `fetch` (הקשר תוסף → עוקף CORS) → `Blob` → `blob:` URL, ומחזיר אותו.
+4. ה-worker שומר עם `chrome.downloads.download({url: blobUrl})` — **URL נקי של blob, בלי חתימה לשבש, בלי רשת/CORS/referer** (נתונים מקומיים → דיסק). מקבל downloadId, עוקב עד סיום, ואז משחרר את ה-blob.
+
+### גם נוסף
+- **סטטוס ב-`chrome.storage`** (`mhDlStatus`) — כדי שנראה התקדמות/שגיאה גם בלי התראות מערכת.
+- הקובץ מופיע ב-`chrome://downloads` ויורד שם (משוב ברור).
+- הרשאת `offscreen`.
+
+### למה זה אמור לעבוד הפעם
+ה-fetch רץ עכשיו ב**אותו הקשר** שבו ה-probe הצליח (206 video), וההורדה היא של `blob:` URL נקי דרך chrome.downloads — שני חלקים מוכחים/בטוחים. אם עדיין נכשל — `mhDlStatus` ב-storage או ה-Console של ה-service worker יראו את השגיאה המדויקת.
+
+---
+
 ## v1.32.2 — ניקוי: הסרת קוד מת + ה-DNR/Referer המיותר
 
 לאחר המעבר להורדה דרך ה-background worker, נשאר הרבה קוד יתום וגם מנגנון Referer שהוכח מיותר. ניקיתי (בלי לשנות התנהגות של נתיבים חיים; אומת ב-`node --check` + בדיקת אפס-הפניות):
