@@ -4,6 +4,14 @@
 
 ---
 
+## v1.32.5 — Referer חזרה (ממוקד) — חלק מההקלטות דורשות אותו
+
+הלוגים חשפו: `step2 = http_403`. ה-fetch ב-offscreen מגיע לשרת ונדחה. הסתבר ש**חלק מההקלטות** (כמו חיישנים/replay03) **כן** דורשות `Referer` של דומיין החשבון — בניגוד לאחרות (replay04) שבהן ה-probe קיבל 206 בלי Referer. הבקשה של הדפדפן שעבדה להקלטה הזו אכן נשאה `Referer: https://ariel-ac-il.zoom.us/`.
+
+**התיקון:** fetch לא יכול לקבוע Referer חוצה-origin בעצמו → החזרתי כלל `declarativeNetRequest` ממוקד שמוסיף את ה-Referer (+Origin) של דומיין החשבון לבקשות ssrweb. הוא **כן** חל על ה-fetch של ה-offscreen (xmlhttprequest), בניגוד ל-`chrome.downloads`. בנוסף הוספתי `Range: bytes=0-` ל-fetch (כמו הדפדפן). ההרשאה `declarativeNetRequest` הוחזרה.
+
+---
+
 ## v1.32.4 — לוגים מפורטים ב-SW + נתיב גיבוי anchor
 
 כדי לאתר למה לא יורד כלום בלי דיאגנוסטיקה כבדה — הוספתי `console.log` בכל שלב של ההורדה (גלוי ב-Console של ה-service worker שהמשתמש כבר פותח): קבלת הודעה → פתיחת טאב → תפיסת URL → fetch ב-offscreen → chrome.downloads → סיום. כל שלב מדפיס תוצאה, כך שאפשר לראות בדיוק איפה זה נעצר.

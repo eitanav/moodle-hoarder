@@ -13,7 +13,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'mh-offscreen-fetch' && msg.url) {
     (async () => {
       try {
-        const r = await fetch(msg.url, { credentials: 'include', cache: 'no-store' });
+        const r = await fetch(msg.url, { credentials: 'include', cache: 'no-store', headers: { Range: 'bytes=0-' } });
         if (!r.ok) { sendResponse({ error: 'http_' + r.status }); return; }
         const blob = await r.blob();
         const blobUrl = URL.createObjectURL(blob);
