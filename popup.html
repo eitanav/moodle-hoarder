@@ -146,6 +146,21 @@
   .row-btns { display: flex; gap: 8px; margin-top: 10px; }
   .row-btns button { width: auto; flex: 1; }
 
+  details.advanced-debug {
+    margin-top: 8px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: color-mix(in srgb, var(--row) 65%, transparent);
+  }
+  details.advanced-debug summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 11px;
+    list-style-position: inside;
+  }
+  details.advanced-debug[open] summary { margin-bottom: 6px; color: var(--fg); }
+
   #status { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; }
 
   .progress-wrap {
@@ -342,32 +357,6 @@
 
   .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
 
-  /* Quality chooser modal (🎥 video download → "שאל אותי"). */
-  .mh-overlay {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(0, 0, 0, 0.45);
-    display: flex; align-items: center; justify-content: center;
-    padding: 16px;
-  }
-  .mh-overlay[hidden] { display: none; }
-  .mh-modal {
-    background: var(--bg); color: var(--fg);
-    border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
-    width: 100%; max-width: 300px; padding: 16px;
-  }
-  .mh-modal-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-  .mh-modal-sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.4; }
-  .mh-modal-body { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-  .mh-q-btn {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    width: 100%; padding: 10px 12px; cursor: pointer;
-    border: 1px solid var(--border); border-radius: 8px;
-    background: var(--row); color: var(--fg); font-size: 13px; text-align: start;
-  }
-  .mh-q-btn:hover { background: var(--row-hover); border-color: var(--accent); }
-  .mh-q-sub { font-size: 11px; color: var(--muted); white-space: nowrap; }
-  .mh-modal-actions { display: flex; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -395,16 +384,6 @@
         <span id="queueCountText">0 פריטים בתור</span> · הורד הכל כ-ZIP
       </button>
       <a id="clearQueue" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
-    </div>
-    <!-- Standalone VTT→TXT converter. Takes any .vtt the user has — from
-         a previous run, downloaded directly from Zoom, or anywhere — and
-         spits out the cleaned TXT. Reuses vttToCleanText. -->
-    <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border);">
-      <label for="vttFile" id="vttConvertBtn" style="display:block; padding: 8px 12px; background: var(--row); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center;">
-        🔄 המר קובץ VTT לטקסט נקי
-      </label>
-      <input id="vttFile" type="file" accept=".vtt,text/vtt,text/plain" multiple style="display:none;">
-      <div class="hint" style="margin-top: 6px;">בחר קובץ <code>.vtt</code> מהמחשב (אפשר גם כמה ביחד). יורד <code>.txt</code> עם דוברים ופסקאות.</div>
     </div>
   </div>
 
@@ -474,67 +453,36 @@
     </div>
     <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
     <ul class="courses" id="zoomItems"></ul>
-    <!-- Phase 0 video debug — when checked, after the standard URL +
-         transcript extraction, the extension opens the first selected
-         recording in a hidden tab, clicks Play, monitors fetch/XHR/MSE
-         for 20s, then downloads zoom-network-debug.json so we can see
-         whether the recording is served as direct MP4 or HLS (and
-         therefore plan a real download feature). -->
-    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
-      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
-        <input type="checkbox" id="zoomDebugNetwork">
-        <span>🎬 תלכוד debug של network (לחקירת הורדת וידאו — איטי, ~25 שניות לכל הקלטה)</span>
-      </label>
-    </div>
-    <!-- Quality selector for video download. Populated/used by the
-         "הורד סרטונים" button. 'best' = highest resolution available. -->
-    <div class="row" style="display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px;">
-      <span style="color:var(--muted);">איכות וידאו:</span>
-      <select id="zoomQuality" style="flex:1; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); font-size:12px;">
-        <option value="best">הטובה ביותר (ברירת מחדל)</option>
-        <option value="smallest">הקטנה ביותר (חוסך מקום)</option>
-        <option value="ask">שאל אותי (בחר איכות)</option>
-      </select>
-    </div>
     <div class="row-btns" style="flex-wrap:wrap; gap:6px;">
       <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
       <button id="downloadZoomLinks" style="flex:1; min-width:130px;">📄 קישורים ותמלילים</button>
       <button id="downloadZoomVideos" style="flex:1; min-width:130px;">🎥 הורד סרטונים (MP4)</button>
     </div>
-    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור).</div>
-    <div class="row-btns" style="margin-top:8px;">
-      <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה — למה ההורדה נכשלת?</button>
-    </div>
-    <div class="hint" style="margin-top:6px;">🩺 בודק שלב-אחר-שלב את כל הצנרת על ההקלטה הראשונה. <b>השאר את הפופאפ פתוח עד הסוף (~40 שניות).</b> התוצאה תופיע למטה להעתקה (גם אם ההורדה נכשלת).</div>
-    <div class="row-btns" style="margin-top:8px;">
-      <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק (network trace מלא)</button>
-    </div>
-    <div class="hint" style="margin-top:6px;">🔬 מקליט עם <code>chrome.debugger</code> את <b>כל</b> בקשות הרשת של הנגן (כולל request/response headers, status, וגוף שגיאות) — חושף בדיוק איך אריאל/Zoom מגישים את הווידאו. פותח טאב גלוי, ~30 שניות. ייתכן באנר "Moodle Hoarder החל לנפות באגים" — זה תקין.</div>
-    <div id="zoomDiagResult" style="display:none; margin-top:8px;">
-      <div style="display:flex; gap:6px; margin-bottom:4px;">
-        <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור). איכות הווידאו נלקחת ממה ש-Zoom חושף בפועל; אם Windows לא פותח — נסה VLC.</div>
+    <details class="advanced-debug">
+      <summary>🩺 משהו לא עובד? פתח כלי אבחון</summary>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer; color:var(--muted); margin:4px 0 8px;">
+        <input type="checkbox" id="zoomDebugNetwork">
+        <span>🎬 תלכוד debug של network (איטי, ~25 שניות לכל הקלטה)</span>
+      </label>
+      <div class="row-btns" style="margin-top:8px;">
+        <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה קצרה</button>
+        <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק</button>
       </div>
-      <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
-    </div>
+      <div class="hint" style="margin-top:6px;">פתח רק כשמשהו נכשל. הדיאגנוסטיקה בודקת את הצנרת; המחקר העמוק מקליט network trace עם <code>chrome.debugger</code>.</div>
+      <div id="zoomDiagResult" style="display:none; margin-top:8px;">
+        <div style="display:flex; gap:6px; margin-bottom:4px;">
+          <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+        </div>
+        <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
+      </div>
+    </details>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
   <div id="status"></div>
   <div id="log"></div>
 
-  <!-- Quality chooser modal — reserved for the 🎥 "שאל אותי" flow on the
-       background-worker download path (chooser to be re-wired; currently
-       'ask' behaves like 'best'). Hidden/unused until then. -->
-  <div id="qualityOverlay" class="mh-overlay" hidden>
-    <div class="mh-modal" role="dialog" aria-modal="true" aria-label="בחר איכות וידאו">
-      <div class="mh-modal-title">בחר איכות וידאו</div>
-      <div class="mh-modal-sub">בחר את הרזולוציה להורדה. אם להקלטה מסוימת אין את הרזולוציה הזו — תיבחר הקרובה ביותר.</div>
-      <div class="mh-modal-body" id="qualityOptions"></div>
-      <div class="mh-modal-actions">
-        <button class="secondary" id="qualityCancel">ביטול</button>
-      </div>
-    </div>
-  </div>
 </main>
 
 <script src="settings.js"></script>
