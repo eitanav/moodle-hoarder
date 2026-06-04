@@ -4,7 +4,7 @@
 
 ---
 
-## v1.33.0 / 2.0 RC 1 — פוליש לקראת v2 יציבה
+## v1.33.0 — פוליש לקראת v2 יציבה
 
 - נוספה תכנית V2/V2.1/V3 ל-ROADMAP: progress להורדות וידאו, הסתרת כלי debug, היסטוריית הורדות אמיתית, בדיקות שחרור, ריפקטור אחרי V2, וכיוון לכלי מקומי לתמלול Whisper.
 - הורדות Zoom MP4 נשלחות עכשיו כ-batch ל-service worker, שמפרסם `mhDlStatus` מפורט עם total/completed/failed/current/bytes כדי שה-popup יוכל להציג progress ברור.
