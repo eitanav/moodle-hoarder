@@ -394,25 +394,13 @@ async function _mhCaptureSignedUrl(tabId) {
   return chosen?.url || urls[0];
 }
 
-const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
-
 async function _mhAppendHistory(entry) {
   try {
-    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
-    const history = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? stored[DOWNLOAD_HISTORY_KEY] : [];
+    const key = 'downloadHistory';
+    const stored = await chrome.storage.local.get(key);
+    const history = Array.isArray(stored[key]) ? stored[key] : [];
     history.unshift({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, ...entry });
-    await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: history.slice(0, 200) });
-  } catch {}
-}
-
-const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
-
-async function _mhAppendHistory(entry) {
-  try {
-    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
-    const history = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? stored[DOWNLOAD_HISTORY_KEY] : [];
-    history.unshift({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, ...entry });
-    await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: history.slice(0, 200) });
+    await chrome.storage.local.set({ [key]: history.slice(0, 200) });
   } catch {}
 }
 
