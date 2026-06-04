@@ -8,7 +8,7 @@
 
 > Chrome extension that hoards every file, folder, assignment, syllabus and recording link from an Ariel University Moodle course into one tidy ZIP.
 
-![version](https://img.shields.io/badge/version-1.8.0-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
+![version](https://img.shields.io/badge/version-1.33.4-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
 
 ---
 
@@ -68,6 +68,8 @@
 2. דף הקלטות Zoom נטען
 3. פתח את התוסף → "סרוק"
 4. יורד `zoom-recordings_<תאריך>.txt` עם רשימת הקישורים והמטא-דאטה
+
+> טיפ: בהורדת MP4, אם הנגן המובנה של Windows מציג `unsupported encoding settings`, פתח את הקובץ עם VLC. זה בדרך כלל אומר שהנגן המובנה לא תומך בהגדרות הקידוד של Zoom, לא שההורדה פגומה.
 
 ### דדליינים ביומן
 
