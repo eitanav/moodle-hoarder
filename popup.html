@@ -146,6 +146,21 @@
   .row-btns { display: flex; gap: 8px; margin-top: 10px; }
   .row-btns button { width: auto; flex: 1; }
 
+  details.advanced-debug {
+    margin-top: 8px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: color-mix(in srgb, var(--row) 65%, transparent);
+  }
+  details.advanced-debug summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 11px;
+    list-style-position: inside;
+  }
+  details.advanced-debug[open] summary { margin-bottom: 6px; color: var(--fg); }
+
   #status { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; }
 
   .progress-wrap {
@@ -474,18 +489,6 @@
     </div>
     <div class="summary"><span class="count" id="selZoom">0</span> <span data-i18n="zoom.selected.suffix">נבחרו</span></div>
     <ul class="courses" id="zoomItems"></ul>
-    <!-- Phase 0 video debug — when checked, after the standard URL +
-         transcript extraction, the extension opens the first selected
-         recording in a hidden tab, clicks Play, monitors fetch/XHR/MSE
-         for 20s, then downloads zoom-network-debug.json so we can see
-         whether the recording is served as direct MP4 or HLS (and
-         therefore plan a real download feature). -->
-    <div class="banner show" style="background:transparent;color:var(--muted);padding:6px 0;">
-      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
-        <input type="checkbox" id="zoomDebugNetwork">
-        <span>🎬 תלכוד debug של network (לחקירת הורדת וידאו — איטי, ~25 שניות לכל הקלטה)</span>
-      </label>
-    </div>
     <!-- Quality selector for video download. Populated/used by the
          "הורד סרטונים" button. 'best' = highest resolution available. -->
     <div class="row" style="display:flex; align-items:center; gap:8px; margin:8px 0; font-size:12px;">
@@ -501,21 +504,25 @@
       <button id="downloadZoomLinks" style="flex:1; min-width:130px;">📄 קישורים ותמלילים</button>
       <button id="downloadZoomVideos" style="flex:1; min-width:130px;">🎥 הורד סרטונים (MP4)</button>
     </div>
-    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור).</div>
-    <div class="row-btns" style="margin-top:8px;">
-      <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה — למה ההורדה נכשלת?</button>
-    </div>
-    <div class="hint" style="margin-top:6px;">🩺 בודק שלב-אחר-שלב את כל הצנרת על ההקלטה הראשונה. <b>השאר את הפופאפ פתוח עד הסוף (~40 שניות).</b> התוצאה תופיע למטה להעתקה (גם אם ההורדה נכשלת).</div>
-    <div class="row-btns" style="margin-top:8px;">
-      <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק (network trace מלא)</button>
-    </div>
-    <div class="hint" style="margin-top:6px;">🔬 מקליט עם <code>chrome.debugger</code> את <b>כל</b> בקשות הרשת של הנגן (כולל request/response headers, status, וגוף שגיאות) — חושף בדיוק איך אריאל/Zoom מגישים את הווידאו. פותח טאב גלוי, ~30 שניות. ייתכן באנר "Moodle Hoarder החל לנפות באגים" — זה תקין.</div>
-    <div id="zoomDiagResult" style="display:none; margin-top:8px;">
-      <div style="display:flex; gap:6px; margin-bottom:4px;">
-        <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור). אם Windows לא פותח — נסה VLC.</div>
+    <details class="advanced-debug">
+      <summary>🩺 משהו לא עובד? פתח כלי אבחון</summary>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer; color:var(--muted); margin:4px 0 8px;">
+        <input type="checkbox" id="zoomDebugNetwork">
+        <span>🎬 תלכוד debug של network (איטי, ~25 שניות לכל הקלטה)</span>
+      </label>
+      <div class="row-btns" style="margin-top:8px;">
+        <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה קצרה</button>
+        <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק</button>
       </div>
-      <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
-    </div>
+      <div class="hint" style="margin-top:6px;">פתח רק כשמשהו נכשל. הדיאגנוסטיקה בודקת את הצנרת; המחקר העמוק מקליט network trace עם <code>chrome.debugger</code>.</div>
+      <div id="zoomDiagResult" style="display:none; margin-top:8px;">
+        <div style="display:flex; gap:6px; margin-bottom:4px;">
+          <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+        </div>
+        <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
+      </div>
+    </details>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>
