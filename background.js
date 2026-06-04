@@ -408,27 +408,54 @@ async function _mhDownloadOne(job) {
   let tabId = null, blobUrl = null;
   try {
     // 1) Open the playback page in a hidden tab and capture the signed MP4 URL.
+    console.log('[MH] step1: opening playback tab', playUrl);
     const tab = await chrome.tabs.create({ url: playUrl, active: false });
     tabId = tab.id;
     await new Promise(r => setTimeout(r, 3500));
     const signed = await _mhCaptureSignedUrl(tabId, quality);
     try { if (tabId) { await chrome.tabs.remove(tabId); tabId = null; } } catch {}
+    console.log('[MH] step1 result: signed URL =', signed ? signed.slice(0, 80) + '… (len ' + signed.length + ')' : 'NULL');
     if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג — סרוק מחדש סמוך ללחיצה)' };
     // 2) Fetch the bytes in the offscreen doc (extension origin → no CORS).
+    console.log('[MH] step2: ensuring offscreen + fetching in offscreen…');
     await _mhEnsureOffscreen();
     const resp = await _mhOffscreenFetch(signed);
+    console.log('[MH] step2 result:', resp && resp.ok ? ('blob ok, size=' + resp.size) : ('FAIL ' + JSON.stringify(resp)));
     if (!resp.ok) return { error: 'fetch נכשל (' + (resp.error || '?') + ')' };
     blobUrl = resp.blobUrl;
     // 3) Save the blob via chrome.downloads — a clean blob: URL, no signature
     //    to mangle, no network/CORS/referer involved (local data → disk).
-    const downloadId = await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
+    console.log('[MH] step3: chrome.downloads.download(blobUrl)…');
+    let downloadId = null;
+    try {
+      downloadId = await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
+      console.log('[MH] step3 result: downloadId =', downloadId);
+    } catch (e) {
+      console.log('[MH] step3 chrome.downloads failed, falling back to offscreen anchor:', e && e.message || e);
+    }
+    if (downloadId == null) {
+      // Fallback: let the offscreen doc trigger the download via <a download>.
+      const anchorRes = await chrome.runtime.sendMessage({ type: 'mh-offscreen-anchor', blobUrl, filename }).catch((e) => ({ error: String(e) }));
+      console.log('[MH] step3 anchor fallback:', JSON.stringify(anchorRes));
+      if (!anchorRes || !anchorRes.ok) return { error: 'שמירה נכשלה (downloads+anchor): ' + (anchorRes && anchorRes.error || '?') };
+      // Give the browser time to read the blob, then report success (we can't
+      // track an anchor download by id). Keep the blob alive a while.
+      await new Promise(r => setTimeout(r, 8000));
+      return { ok: true, bytes: resp.size, viaAnchor: true };
+    }
     const res = await _mhWaitForDownloadId(downloadId);
+    console.log('[MH] step4 result:', JSON.stringify(res));
+    // Download finished reading the blob → safe to free it now.
+    try { chrome.runtime.sendMessage({ type: 'mh-offscreen-revoke', blobUrl }); } catch {}
     return res.ok ? { ok: true, bytes: res.bytes || resp.size } : { error: 'הורדה נכשלה: ' + res.error };
   } catch (e) {
+    console.log('[MH] _mhDownloadOne THREW:', e && e.message || e);
     return { error: String(e && e.message || e) };
   } finally {
+    // NOTE: do NOT revoke the blob here — the chrome.downloads path revokes
+    // after completion, and the anchor-fallback path relies on the offscreen's
+    // own 30-min backstop (revoking now would abort an in-progress download).
     if (tabId) { try { await chrome.tabs.remove(tabId); } catch {} }
-    if (blobUrl) { try { chrome.runtime.sendMessage({ type: 'mh-offscreen-revoke', blobUrl }); } catch {} }
   }
 }
 
@@ -453,6 +480,7 @@ async function _mhProcessQueue() {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== 'mh-download-rec' || !msg.playUrl) return;
+  console.log('[MH] mh-download-rec received:', msg.filename, msg.playUrl);
   _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', quality: msg.quality || 'best' });
   _mhProcessQueue();
   sendResponse?.({ ok: true, queued: _mhDlQueue.length });

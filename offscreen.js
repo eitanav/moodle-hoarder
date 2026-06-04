@@ -17,6 +17,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!r.ok) { sendResponse({ error: 'http_' + r.status }); return; }
         const blob = await r.blob();
         const blobUrl = URL.createObjectURL(blob);
+        // Safety backstop: free the blob after 30 min in case the worker never
+        // sends an explicit revoke (e.g. the anchor-fallback path).
+        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 30 * 60 * 1000);
         sendResponse({ ok: true, blobUrl, size: blob.size, mime: blob.type });
       } catch (e) {
         sendResponse({ error: String((e && e.message) || e) });
@@ -26,5 +29,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg?.type === 'mh-offscreen-revoke' && msg.blobUrl) {
     try { URL.revokeObjectURL(msg.blobUrl); } catch {}
+  }
+  // Fallback: download the already-created blob via an <a download> click in
+  // the offscreen document (used if chrome.downloads can't read the blob URL
+  // from the worker context).
+  if (msg?.type === 'mh-offscreen-anchor' && msg.blobUrl) {
+    try {
+      const a = document.createElement('a');
+      a.href = msg.blobUrl;
+      a.download = msg.filename || 'recording.mp4';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      sendResponse?.({ ok: true });
+    } catch (e) {
+      sendResponse?.({ error: String((e && e.message) || e) });
+    }
+    return true;
   }
 });

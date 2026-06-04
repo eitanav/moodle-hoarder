@@ -4,6 +4,14 @@
 
 ---
 
+## v1.32.4 — לוגים מפורטים ב-SW + נתיב גיבוי anchor
+
+כדי לאתר למה לא יורד כלום בלי דיאגנוסטיקה כבדה — הוספתי `console.log` בכל שלב של ההורדה (גלוי ב-Console של ה-service worker שהמשתמש כבר פותח): קבלת הודעה → פתיחת טאב → תפיסת URL → fetch ב-offscreen → chrome.downloads → סיום. כל שלב מדפיס תוצאה, כך שאפשר לראות בדיוק איפה זה נעצר.
+
+בנוסף — **נתיב גיבוי**: אם `chrome.downloads.download(blobUrl)` נכשל (ייתכן שלא יודע לקרוא blob URL מהקשר ה-offscreen), ה-offscreen מוריד בעצמו עם `<a download>`. וניהול חיי ה-blob תוקן (לא משחררים תוך כדי הורדה; backstop של 30 דק' ב-offscreen).
+
+---
+
 ## v1.32.3 — הורדה דרך offscreen document (עוקף את חסם ה-CORS)
 
 הורדת ה-fetch-בדף (1.32.1/1.32.2) הורידה כלום. הסיבה: ה-`fetch` רץ **בתוך דף ה-Zoom** (דף web רגיל) → כפוף ל-CORS, וכנראה נחסם. ה-download-probe עבד כי הוא רץ ב**הקשר התוסף** (popup), שם `host_permissions` עוקפות CORS לגמרי.
