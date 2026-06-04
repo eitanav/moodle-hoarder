@@ -331,7 +331,7 @@ function _mhNotify(message, title) {
   try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon-128.png', title: title || 'Moodle Hoarder', message }); } catch {}
 }
 
-async function _mhCaptureSignedUrl(tabId, quality) {
+async function _mhCaptureSignedUrl(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId }, world: 'MAIN',
     func: () => {
@@ -362,9 +362,47 @@ async function _mhCaptureSignedUrl(tabId, quality) {
     if (urls.length > 0 && Date.now() - start > 7000) break;
   }
   if (!urls.length) return null;
-  const score = (u) => { const m = (u || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i); return m ? (+m[1]) * (+m[2]) : 0; };
-  urls.sort((a, b) => score(b) - score(a));
-  return quality === 'smallest' ? urls[urls.length - 1] : urls[0];
+
+  const parseCandidate = (url, index) => {
+    const raw = String(url || '');
+    let text = raw;
+    try { text = decodeURIComponent(raw); } catch {}
+    let width = 0, height = 0;
+    const xy = text.match(/(?:^|[^0-9])(\d{3,4})x(\d{3,4})(?:[^0-9]|$)/i);
+    if (xy) {
+      width = Number(xy[1]) || 0;
+      height = Number(xy[2]) || 0;
+    } else {
+      const p = text.match(/(?:^|[^0-9])(360|480|540|720|1080|1440|2160)p(?:[^0-9]|$)/i);
+      if (p) height = Number(p[1]) || 0;
+    }
+    const pixels = width && height ? width * height : height;
+    const label = width && height ? `${width}x${height}` : (height ? `${height}p` : 'unknown');
+    return { url: raw, index, pixels, label };
+  };
+
+  const candidates = urls.map(parseCandidate);
+  const known = candidates.filter(c => c.pixels > 0).sort((a, b) => b.pixels - a.pixels || a.index - b.index);
+  const chosen = known[0] || candidates[0];
+  console.log('[MH] video candidates:', {
+    selection: 'best',
+    found: candidates.length,
+    detected: known.map(c => c.label),
+    chosen: chosen?.label || 'unknown',
+    note: known.length ? '' : 'No resolution markers detected; using the first MP4 candidate.',
+  });
+  return chosen?.url || urls[0];
+}
+
+const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
+
+async function _mhAppendHistory(entry) {
+  try {
+    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
+    const history = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? stored[DOWNLOAD_HISTORY_KEY] : [];
+    history.unshift({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, ...entry });
+    await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: history.slice(0, 200) });
+  } catch {}
 }
 
 const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
@@ -459,7 +497,7 @@ async function _mhSetRefererRule(origin) {
 }
 
 async function _mhDownloadOne(job) {
-  const { playUrl, filename, quality } = job;
+  const { playUrl, filename } = job;
   let tabId = null, blobUrl = null;
   try {
     // 1) Open the playback page in a hidden tab and capture the signed MP4 URL.
@@ -467,7 +505,7 @@ async function _mhDownloadOne(job) {
     const tab = await chrome.tabs.create({ url: playUrl, active: false });
     tabId = tab.id;
     await new Promise(r => setTimeout(r, 3500));
-    const signed = await _mhCaptureSignedUrl(tabId, quality);
+    const signed = await _mhCaptureSignedUrl(tabId);
     try { if (tabId) { await chrome.tabs.remove(tabId); tabId = null; } } catch {}
     console.log('[MH] step1 result: signed URL =', signed ? signed.slice(0, 80) + '… (len ' + signed.length + ')' : 'NULL');
     if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג — סרוק מחדש סמוך ללחיצה)' };
@@ -581,7 +619,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     _mhEnsureBatch(msg.jobs.length, { courseName: msg.courseName || '', sourceUrl: msg.sourceUrl || '' });
     for (const job of msg.jobs) {
       _mhDlQueue.push({
-        playUrl: job.playUrl, filename: job.filename || 'recording.mp4', quality: msg.quality || job.quality || 'best',
+        playUrl: job.playUrl, filename: job.filename || 'recording.mp4',
         topic: job.topic || '', date: job.date || '',
       });
     }
@@ -597,7 +635,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== 'mh-download-rec' || !msg.playUrl) return;
   console.log('[MH] mh-download-rec received:', msg.filename, msg.playUrl);
   _mhEnsureBatch(1, { courseName: msg.courseName || '', sourceUrl: msg.sourceUrl || '' });
-  _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', quality: msg.quality || 'best', topic: msg.topic || '', date: msg.date || '' });
+  _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', topic: msg.topic || '', date: msg.date || '' });
   _mhProcessQueue();
   sendResponse?.({ ok: true, queued: _mhDlQueue.length, total: _mhDlBatch?.total || 1 });
   return true;
