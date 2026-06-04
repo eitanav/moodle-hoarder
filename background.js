@@ -403,6 +403,33 @@ function _mhWaitForDownloadId(id) {
   });
 }
 
+// Some recordings' CDN nodes reject a request that lacks the account-domain
+// Referer (the browser's <video> request carries it). A fetch() can't set a
+// cross-origin Referer itself, so add it via a declarativeNetRequest rule on
+// ssrweb requests (this DOES apply to the offscreen doc's xmlhttprequest,
+// unlike chrome.downloads requests). Origin derived from the playback URL.
+const _MH_REF_RULE_ID = 9021;
+let _mhRefRuleOrigin = null;
+async function _mhSetRefererRule(origin) {
+  if (_mhRefRuleOrigin === origin) return;
+  if (!chrome.declarativeNetRequest?.updateDynamicRules) return;
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [_MH_REF_RULE_ID],
+      addRules: [{
+        id: _MH_REF_RULE_ID, priority: 1,
+        action: { type: 'modifyHeaders', requestHeaders: [
+          { header: 'referer', operation: 'set', value: origin + '/' },
+          { header: 'origin', operation: 'set', value: origin },
+        ] },
+        condition: { urlFilter: '||ssrweb.zoom.us', resourceTypes: ['xmlhttprequest', 'other', 'media', 'sub_frame', 'main_frame', 'image'] },
+      }],
+    });
+    _mhRefRuleOrigin = origin;
+    console.log('[MH] referer rule set →', origin);
+  } catch (e) { console.log('[MH] referer rule failed:', e && e.message || e); }
+}
+
 async function _mhDownloadOne(job) {
   const { playUrl, filename, quality } = job;
   let tabId = null, blobUrl = null;
@@ -417,6 +444,10 @@ async function _mhDownloadOne(job) {
     console.log('[MH] step1 result: signed URL =', signed ? signed.slice(0, 80) + '… (len ' + signed.length + ')' : 'NULL');
     if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג — סרוק מחדש סמוך ללחיצה)' };
     // 2) Fetch the bytes in the offscreen doc (extension origin → no CORS).
+    //    First install the account-domain Referer rule (some CDN nodes need it).
+    let refOrigin = 'https://zoom.us';
+    try { refOrigin = new URL(playUrl).origin; } catch {}
+    await _mhSetRefererRule(refOrigin);
     console.log('[MH] step2: ensuring offscreen + fetching in offscreen…');
     await _mhEnsureOffscreen();
     const resp = await _mhOffscreenFetch(signed);
