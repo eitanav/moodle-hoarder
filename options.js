@@ -3,6 +3,8 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
+
 const FILETYPE_LABELS = {
   resource:    'קובץ (Resource)',
   folder:      'תיקייה (Folder)',
@@ -90,40 +92,84 @@ function renderFileTypes(settings) {
   }
 }
 
+function formatBytes(n) {
+  if (!n) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = +n || 0, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
+function historyTypeLabel(type) {
+  return ({
+    course: 'קורס ZIP',
+    'zoom-links': 'Zoom קישורים/תמלילים',
+    'zoom-videos': 'Zoom סרטונים',
+    legacySeen: 'קורס (Diff ישן)',
+  })[type] || type || 'הורדה';
+}
+
+function historyStatusLabel(status) {
+  return ({ success: 'הצליח', partial: 'חלקי', failed: 'נכשל' })[status] || '—';
+}
+
 async function renderHistory() {
   const stored = await chrome.storage.local.get(null);
-  const courses = [];
+  const entries = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? [...stored[DOWNLOAD_HISTORY_KEY]] : [];
+  const seenCourseIdsInHistory = new Set(entries.map(e => String(e.courseId || '')).filter(Boolean));
+
+  // Backward-compatible fallback: old versions only wrote seen_<courseId>.
   for (const [key, value] of Object.entries(stored)) {
     if (!key.startsWith('seen_')) continue;
     const courseId = key.slice(5);
-    courses.push({
-      id: courseId,
-      lastDownload: value.lastDownload || 0,
+    if (seenCourseIdsInHistory.has(courseId)) continue;
+    entries.push({
+      id: `legacy_${courseId}`,
+      type: 'legacySeen',
+      title: value.courseName || `קורס ${courseId}`,
+      courseId,
+      sourceUrl: value.courseUrl || `https://moodlearn.ariel.ac.il/course/view.php?id=${encodeURIComponent(courseId)}`,
+      finishedAt: value.lastDownload || 0,
+      status: 'success',
       itemCount: (value.items || []).length,
-      name: value.courseName || `קורס ${courseId}`,
+      successCount: (value.items || []).length,
+      failedCount: 0,
+      bytes: 0,
     });
   }
-  courses.sort((a, b) => b.lastDownload - a.lastDownload);
+  entries.sort((a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
 
   const table = $('#historyTable');
-  if (!courses.length) {
-    table.innerHTML = `<tr><td class="empty">עוד לא הורדת אף קורס</td></tr>`;
+  if (!entries.length) {
+    table.innerHTML = `<tr><td class="empty">עוד לא הורדת אף קורס או הקלטה</td></tr>`;
     return;
   }
   const head = `
     <thead><tr>
-      <th>קורס</th>
+      <th>הורדה</th>
+      <th>סוג</th>
       <th>פריטים</th>
+      <th>סטטוס</th>
+      <th>גודל</th>
       <th>תאריך</th>
       <th>פעולה</th>
     </tr></thead>`;
-  const rows = courses.map(c => `
-    <tr>
-      <td>${escapeHtml(c.name)}</td>
-      <td>${c.itemCount}</td>
-      <td>${c.lastDownload ? new Date(c.lastDownload).toLocaleString('he-IL') : '—'}</td>
-      <td><a href="https://moodlearn.ariel.ac.il/course/view.php?id=${encodeURIComponent(c.id)}" target="_blank" style="color: var(--accent);">פתח</a></td>
-    </tr>`).join('');
+  const rows = entries.slice(0, 200).map(e => {
+    const total = e.itemCount ?? e.successCount ?? 0;
+    const counts = e.failedCount ? `${e.successCount || 0}/${total} (${e.failedCount} נכשלו)` : String(total || '—');
+    const url = e.sourceUrl || (e.courseId ? `https://moodlearn.ariel.ac.il/course/view.php?id=${encodeURIComponent(e.courseId)}` : '');
+    const action = url ? `<a href="${escapeHtml(url)}" target="_blank" style="color: var(--accent);">פתח</a>` : '—';
+    return `
+      <tr>
+        <td>${escapeHtml(e.title || e.filename || 'הורדה')}</td>
+        <td>${escapeHtml(historyTypeLabel(e.type))}</td>
+        <td>${escapeHtml(counts)}</td>
+        <td>${escapeHtml(historyStatusLabel(e.status))}</td>
+        <td>${formatBytes(e.bytes)}</td>
+        <td>${e.finishedAt || e.startedAt ? new Date(e.finishedAt || e.startedAt).toLocaleString('he-IL') : '—'}</td>
+        <td>${action}</td>
+      </tr>`;
+  }).join('');
   table.innerHTML = head + '<tbody>' + rows + '</tbody>';
 }
 
@@ -175,6 +221,7 @@ function escapeHtml(s) {
     if (!confirm('למחוק את כל היסטוריית הקורסים שהורדת? (לא ימחק קבצים שכבר ירדו)')) return;
     const stored = await chrome.storage.local.get(null);
     const toRemove = Object.keys(stored).filter(k => k.startsWith('seen_'));
+    toRemove.push(DOWNLOAD_HISTORY_KEY);
     await chrome.storage.local.remove(toRemove);
     await renderHistory();
     flashSaved();
