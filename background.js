@@ -309,6 +309,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // a time.
 const _mhDlQueue = [];
 let _mhDlBusy = false;
+let _mhDlBatch = null;
+
+function _mhEnsureBatch(totalHint = 0, meta = {}) {
+  if (!_mhDlBatch || (!_mhDlBusy && _mhDlQueue.length === 0 && _mhDlBatch.state === 'complete')) {
+    _mhDlBatch = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      startedAt: Date.now(),
+      total: 0, completed: 0, failed: 0, bytes: 0,
+      files: [], errors: [], state: 'queued',
+      ...meta,
+    };
+  } else {
+    _mhDlBatch = { ..._mhDlBatch, ...meta };
+  }
+  if (totalHint > 0) _mhDlBatch.total += totalHint;
+  return _mhDlBatch;
+}
 
 function _mhNotify(message, title) {
   try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon-128.png', title: title || 'Moodle Hoarder', message }); } catch {}
@@ -348,6 +365,17 @@ async function _mhCaptureSignedUrl(tabId, quality) {
   const score = (u) => { const m = (u || '').match(/_(\d{3,4})x(\d{3,4})\.mp4/i); return m ? (+m[1]) * (+m[2]) : 0; };
   urls.sort((a, b) => score(b) - score(a));
   return quality === 'smallest' ? urls[urls.length - 1] : urls[0];
+}
+
+const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
+
+async function _mhAppendHistory(entry) {
+  try {
+    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
+    const history = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? stored[DOWNLOAD_HISTORY_KEY] : [];
+    history.unshift({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, ...entry });
+    await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: history.slice(0, 200) });
+  } catch {}
 }
 
 // Persisted status so the popup can show progress even without OS notifications.
@@ -496,25 +524,82 @@ async function _mhProcessQueue() {
   try {
     while (_mhDlQueue.length) {
       const job = _mhDlQueue.shift();
-      await _mhSetStatus({ state: 'running', filename: job.filename, remaining: _mhDlQueue.length });
+      const batch = _mhEnsureBatch();
+      const currentIndex = batch.completed + batch.failed + 1;
+      await _mhSetStatus({
+        kind: 'zoom-videos', state: 'running', batchId: batch.id,
+        filename: job.filename, currentIndex, total: batch.total,
+        completed: batch.completed, failed: batch.failed, remaining: Math.max(0, batch.total - currentIndex + 1),
+        bytes: batch.bytes, courseName: batch.courseName || '', sourceUrl: batch.sourceUrl || '',
+      });
       const res = await _mhDownloadOne(job);
       if (res.ok) {
-        await _mhSetStatus({ state: 'done', filename: job.filename, bytes: res.bytes || 0 });
+        batch.completed++;
+        batch.bytes += res.bytes || 0;
+        batch.files.push({ filename: job.filename, bytes: res.bytes || 0, topic: job.topic || '' });
+        await _mhSetStatus({
+          kind: 'zoom-videos', state: 'item-done', batchId: batch.id,
+          filename: job.filename, total: batch.total, completed: batch.completed, failed: batch.failed,
+          remaining: Math.max(0, batch.total - batch.completed - batch.failed), bytes: batch.bytes, lastBytes: res.bytes || 0,
+          courseName: batch.courseName || '', sourceUrl: batch.sourceUrl || '',
+        });
         _mhNotify(`✅ ירד: ${job.filename}${res.bytes ? ` (${(res.bytes / 1048576).toFixed(0)}MB)` : ''}`, 'Moodle Hoarder — וידאו');
       } else {
-        await _mhSetStatus({ state: 'error', filename: job.filename, error: res.error });
+        batch.failed++;
+        batch.errors.push({ filename: job.filename, error: res.error || 'unknown', topic: job.topic || '' });
+        await _mhSetStatus({
+          kind: 'zoom-videos', state: 'item-error', batchId: batch.id,
+          filename: job.filename, error: res.error, total: batch.total, completed: batch.completed, failed: batch.failed,
+          remaining: Math.max(0, batch.total - batch.completed - batch.failed), bytes: batch.bytes,
+          courseName: batch.courseName || '', sourceUrl: batch.sourceUrl || '',
+        });
         _mhNotify(`❌ נכשל: ${job.filename} — ${res.error}`, 'Moodle Hoarder — וידאו');
       }
+    }
+    if (_mhDlBatch) {
+      _mhDlBatch.state = 'complete';
+      _mhDlBatch.finishedAt = Date.now();
+      const status = _mhDlBatch.failed ? (_mhDlBatch.completed ? 'partial' : 'failed') : 'success';
+      await _mhSetStatus({
+        kind: 'zoom-videos', state: 'complete', batchId: _mhDlBatch.id, status,
+        total: _mhDlBatch.total, completed: _mhDlBatch.completed, failed: _mhDlBatch.failed,
+        remaining: 0, bytes: _mhDlBatch.bytes, courseName: _mhDlBatch.courseName || '', sourceUrl: _mhDlBatch.sourceUrl || '',
+      });
+      await _mhAppendHistory({
+        type: 'zoom-videos', title: _mhDlBatch.courseName || 'Zoom videos', sourceUrl: _mhDlBatch.sourceUrl || '',
+        startedAt: _mhDlBatch.startedAt, finishedAt: _mhDlBatch.finishedAt, status,
+        itemCount: _mhDlBatch.total, successCount: _mhDlBatch.completed, failedCount: _mhDlBatch.failed,
+        bytes: _mhDlBatch.bytes, files: _mhDlBatch.files.slice(0, 50), errors: _mhDlBatch.errors.slice(0, 20),
+      });
     }
   } finally { _mhDlBusy = false; }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'mh-download-recs' && Array.isArray(msg.jobs) && msg.jobs.length) {
+    console.log('[MH] mh-download-recs received:', msg.jobs.length, 'jobs');
+    _mhEnsureBatch(msg.jobs.length, { courseName: msg.courseName || '', sourceUrl: msg.sourceUrl || '' });
+    for (const job of msg.jobs) {
+      _mhDlQueue.push({
+        playUrl: job.playUrl, filename: job.filename || 'recording.mp4', quality: msg.quality || job.quality || 'best',
+        topic: job.topic || '', date: job.date || '',
+      });
+    }
+    _mhSetStatus({
+      kind: 'zoom-videos', state: _mhDlBusy ? 'queued' : 'starting', batchId: _mhDlBatch?.id,
+      total: _mhDlBatch?.total || msg.jobs.length, completed: _mhDlBatch?.completed || 0, failed: _mhDlBatch?.failed || 0,
+      remaining: _mhDlQueue.length, bytes: _mhDlBatch?.bytes || 0, courseName: _mhDlBatch?.courseName || '', sourceUrl: _mhDlBatch?.sourceUrl || '',
+    });
+    _mhProcessQueue();
+    sendResponse?.({ ok: true, queued: _mhDlQueue.length, total: _mhDlBatch?.total || msg.jobs.length });
+    return true;
+  }
   if (msg?.type !== 'mh-download-rec' || !msg.playUrl) return;
   console.log('[MH] mh-download-rec received:', msg.filename, msg.playUrl);
-  _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', quality: msg.quality || 'best' });
+  _mhEnsureBatch(1, { courseName: msg.courseName || '', sourceUrl: msg.sourceUrl || '' });
+  _mhDlQueue.push({ playUrl: msg.playUrl, filename: msg.filename || 'recording.mp4', quality: msg.quality || 'best', topic: msg.topic || '', date: msg.date || '' });
   _mhProcessQueue();
-  sendResponse?.({ ok: true, queued: _mhDlQueue.length });
+  sendResponse?.({ ok: true, queued: _mhDlQueue.length, total: _mhDlBatch?.total || 1 });
   return true;
 });
 

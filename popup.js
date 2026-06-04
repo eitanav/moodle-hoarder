@@ -28,6 +28,8 @@ let deadlinesScanned = null; // dashboard: { deadlines: [...], tabId }
 const ACTIVITY_RE = /\/mod\/(resource|folder|assign|url|page|book|forum|quiz|lesson|choice|feedback|workshop|wiki|chat|glossary|scorm|h5pactivity)\/view\.php\?(?:[^#]*&)?id=(\d+)/;
 const ALWAYS_OFF_TYPES = new Set(['forum','chat','feedback','choice','wiki','glossary']);
 const INTRO_OFF_TYPES  = new Set(['url']);
+const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
+
 const STREAM_HOSTS = [
   // Recording / video platforms
   'zoom.us','panopto','kaltura','mediasite','youtu','vimeo.com','dailymotion','twitch.tv',
@@ -63,6 +65,29 @@ function setProgress(done, total) {
   if (total <= 0) { progressWrap.style.display = 'none'; return; }
   progressWrap.style.display = 'block';
   progressBar.style.width = Math.round((done / total) * 100) + '%';
+}
+function renderZoomVideoStatus(st) {
+  if (!st || st.kind !== 'zoom-videos') return;
+  const total = Math.max(0, +(st.total || 0));
+  const completed = Math.max(0, +(st.completed || 0));
+  const failed = Math.max(0, +(st.failed || 0));
+  const finished = completed + failed;
+  if (total > 0) setProgress(Math.min(finished, total), total);
+  const size = st.bytes ? ` · ${formatSize(st.bytes)}` : '';
+  if (st.state === 'running') {
+    const idx = st.currentIndex || (finished + 1);
+    setStatus(`🎥 מוריד סרטונים: ${idx}/${total} — ${st.filename || ''} (${completed} הסתיימו, ${failed} נכשלו)${size}`);
+  } else if (st.state === 'starting' || st.state === 'queued') {
+    setStatus(`🎥 מכין תור הורדות: ${total} סרטונים`);
+  } else if (st.state === 'item-done') {
+    setStatus(`🎥 ${completed}/${total} ירדו (${failed} נכשלו)${size}`);
+  } else if (st.state === 'item-error') {
+    setStatus(`🎥 ${completed}/${total} ירדו, ${failed} נכשלו — ${st.filename || ''}: ${st.error || ''}`);
+  } else if (st.state === 'complete') {
+    setProgress(total, total);
+    const label = failed ? `הסתיים חלקית: ${completed}/${total} ירדו, ${failed} נכשלו` : `כל ${total} הסרטונים ירדו`;
+    setStatus(`✅ ${label}${size}. אם Windows לא פותח את הקובץ — נסה VLC.`);
+  }
 }
 function showView(name) {
   const views = {
@@ -1297,6 +1322,11 @@ $('downloadZoomLinks').addEventListener('click', async () => {
       const date = new Date().toISOString().slice(0, 10);
       const zipName = zoomZipFilename(withUrls, date);
       await chrome.downloads.download({ url: URL.createObjectURL(zipBlob), filename: zipName, saveAs: !!CACHED_SETTINGS?.saveAs });
+      await appendDownloadHistory({
+        type: 'zoom-links', title: zoomHistoryTitle(withUrls), sourceUrl: zoomScanned.data?.pageUrl || '',
+        startedAt: Date.now(), finishedAt: Date.now(), status: okT === transcripts.length ? 'success' : 'partial',
+        itemCount: transcripts.length, successCount: okT, failedCount: transcripts.length - okT, bytes: zipBlob.size, filename: zipName,
+      });
       setStatus(`✅ ${zipName} — ${okT}/${transcripts.length} תמלילים חולצו.`);
       notify('Moodle Hoarder', `Zoom: ${okT}/${transcripts.length} תמלילים, ${ok} URLs`);
     } else {
@@ -1350,11 +1380,15 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     // captures the signed URL, fetch()es it IN the page (correct cookies/CORS),
     // and saves it via a blob anchor. Runs in the SW so it survives popup close.
     // NOTE: 'ask' currently behaves like 'best' on this path (chooser TBD).
-    const dlList = withUrls.map(r => ({ playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4' }));
-    for (const d of dlList) {
-      chrome.runtime.sendMessage({ type: 'mh-download-rec', playUrl: d.playUrl, filename: d.filename, quality });
-    }
-    setStatus(`\u{1F3A5} ${dlList.length} הורדות התחילו ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר לרגע, ואז הקובץ יופיע ב-chrome://downloads ויירד שם (לקובץ גדול זה דקות). תופיע התראה כשמסתיים. אפשר לסגור את הפופאפ.`);
+    const dlList = withUrls.map(r => ({
+      playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4', topic: r.topic || '', date: r.date || '',
+    }));
+    setProgress(0, dlList.length);
+    const title = zoomHistoryTitle(withUrls);
+    chrome.runtime.sendMessage({
+      type: 'mh-download-recs', jobs: dlList, quality, courseName: title, sourceUrl: zoomScanned.data?.pageUrl || '',
+    });
+    setStatus(`🎥 ${dlList.length} הורדות נכנסו לתור. ההורדה רצה ברקע אחת בכל פעם — אפשר לסגור את הפופאפ.`);
     notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
   } finally {
     $('downloadZoomLinks').disabled = false;
@@ -1755,9 +1789,14 @@ function mhShowResearchResult(rec) {
   }
 }
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.mhLastResearch?.newValue) mhShowResearchResult(changes.mhLastResearch.newValue);
+  if (area !== 'local') return;
+  if (changes.mhLastResearch?.newValue) mhShowResearchResult(changes.mhLastResearch.newValue);
+  if (changes.mhDlStatus?.newValue) renderZoomVideoStatus(changes.mhDlStatus.newValue);
 });
-chrome.storage.local.get('mhLastResearch').then(s => { if (s.mhLastResearch?.json) mhShowResearchResult(s.mhLastResearch); }).catch(() => {});
+chrome.storage.local.get(['mhLastResearch', 'mhDlStatus']).then(s => {
+  if (s.mhLastResearch?.json) mhShowResearchResult(s.mhLastResearch);
+  if (s.mhDlStatus?.kind === 'zoom-videos' && s.mhDlStatus.state !== 'complete') renderZoomVideoStatus(s.mhDlStatus);
+}).catch(() => {});
 
 // Build the text body Zoom recording lists use — kept identical to the
 // legacy saveZoomFile output so users who turn extractTranscripts off
@@ -1978,6 +2017,16 @@ function transcriptFileStem(rec) {
 // share the same topic (common for a single-course extract), use that
 // topic + " הקלטות" instead of the generic "zoom-recordings". Falls back
 // to the legacy name when topics are too mixed.
+function zoomHistoryTitle(recordings) {
+  const topics = (recordings || []).map(r => (r.topic || '').trim()).filter(Boolean);
+  if (!topics.length) return 'Zoom videos';
+  const counts = new Map();
+  for (const t of topics) counts.set(t, (counts.get(t) || 0) + 1);
+  let dom = topics[0], max = 0;
+  for (const [t, c] of counts) if (c > max) { dom = t; max = c; }
+  return topics.length > 1 ? `${dom} — ${topics.length} הקלטות` : dom;
+}
+
 function zoomZipFilename(recordings, isoDate) {
   const topics = recordings.map(r => (r.topic || '').trim()).filter(Boolean);
   if (topics.length) {
@@ -2631,6 +2680,11 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
     // Bump download counter so frequent courses auto-pin in multi-course view.
     await bumpCourseClick(courseId);
   }
+  await appendDownloadHistory({
+    type: 'course', title: courseName, courseId, sourceUrl: courseUrl, startedAt: Date.now(), finishedAt: Date.now(),
+    status: errors.length ? 'partial' : 'success', itemCount: items.length, successCount: files.length, failedCount: errors.length,
+    bytes: zipBlob.size, filename,
+  });
 
   setStatus(t('status.completed.with.count', { n: files.length, size: formatSize(zipBlob.size) }));
   if (!silent) notify('Moodle Hoarder', t('notif.course.done', { n: files.length, name: courseName }));
@@ -2749,6 +2803,15 @@ function resetFooter() {
 function notify(title, message) {
   try {
     chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon-128.png', title, message });
+  } catch {}
+}
+
+async function appendDownloadHistory(entry) {
+  try {
+    const stored = await chrome.storage.local.get(DOWNLOAD_HISTORY_KEY);
+    const history = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? stored[DOWNLOAD_HISTORY_KEY] : [];
+    history.unshift({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, ...entry });
+    await chrome.storage.local.set({ [DOWNLOAD_HISTORY_KEY]: history.slice(0, 200) });
   } catch {}
 }
 
@@ -3838,10 +3901,17 @@ async function saveZoomFile(data) {
   const date = new Date().toISOString().slice(0, 10);
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
+  const filename = `zoom-recordings_${date}.txt`;
   await chrome.downloads.download({
     url,
-    filename: `zoom-recordings_${date}.txt`,
+    filename,
     saveAs: false,
+  });
+  await appendDownloadHistory({
+    type: 'zoom-links', title: zoomHistoryTitle(data.recordings || []), sourceUrl: data.pageUrl || '',
+    startedAt: Date.now(), finishedAt: Date.now(), status: 'success',
+    itemCount: data.recordings?.length || 0, successCount: data.recordings?.filter(r => r.shareUrls?.length).length || 0,
+    failedCount: data.recordings?.filter(r => r.error).length || 0, bytes: blob.size, filename,
   });
 }
 
