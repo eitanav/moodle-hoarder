@@ -350,83 +350,85 @@ async function _mhCaptureSignedUrl(tabId, quality) {
   return quality === 'smallest' ? urls[urls.length - 1] : urls[0];
 }
 
-// Wait for a download whose filename matches `stem` to finish (or fail).
-function _mhWaitForDownload(stem, sinceMs) {
+// Persisted status so the popup can show progress even without OS notifications.
+async function _mhSetStatus(obj) { try { await chrome.storage.local.set({ mhDlStatus: { at: Date.now(), ...obj } }); } catch {} }
+
+// Single offscreen document — runs in the EXTENSION origin, so its fetch() to
+// ssrweb bypasses CORS via host_permissions (exactly the context the
+// download-probe proved returns 206 video). The in-page fetch was blocked by
+// CORS; this is the fix.
+async function _mhEnsureOffscreen() {
+  try { if (await chrome.offscreen.hasDocument()) return; } catch {}
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['BLOBS'],
+      justification: 'Fetch and save Zoom cloud-recording video files.',
+    });
+  } catch (e) {
+    if (!/single offscreen|already/i.test(String(e))) throw e;
+  }
+}
+
+// Ask the offscreen doc to fetch the signed URL and hand back a blob: URL.
+async function _mhOffscreenFetch(url) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'mh-offscreen-fetch', url });
+      if (resp) return resp;
+    } catch (e) {
+      // Offscreen not ready yet — wait and retry.
+      await new Promise(r => setTimeout(r, 600));
+      await _mhEnsureOffscreen();
+    }
+  }
+  return { error: 'offscreen unreachable' };
+}
+
+// Wait for a specific chrome.downloads item (by id) to finish.
+function _mhWaitForDownloadId(id) {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (v) => { if (!settled) { settled = true; try { chrome.downloads.onChanged.removeListener(onCh); } catch {} resolve(v); } };
-    const base = stem.replace(/\.[^.]+$/, '');
+    const done = (v) => { if (!settled) { settled = true; try { chrome.downloads.onChanged.removeListener(onCh); } catch {} resolve(v); } };
     const onCh = (delta) => {
-      if (!delta.state) return;
-      chrome.downloads.search({ id: delta.id }, (items) => {
-        const it = items && items[0];
-        if (!it) return;
-        const fn = (it.filename || '').replace(/\\/g, '/').split('/').pop();
-        // Serial queue → only one .mp4 is downloading at a time, so match any
-        // .mp4 (Hebrew filenames can be re-sanitised, so don't rely on `base`).
-        if (!fn || !(/\.mp4$/i.test(fn) || fn.includes(base))) return;
-        if (delta.state.current === 'complete') finish({ ok: true, bytes: it.fileSize });
-        else if (delta.state.current === 'interrupted') finish({ ok: false, error: it.error || 'interrupted' });
-      });
+      if (delta.id !== id || !delta.state) return;
+      if (delta.state.current === 'complete') {
+        chrome.downloads.search({ id }, (items) => done({ ok: true, bytes: items && items[0] && items[0].fileSize }));
+      } else if (delta.state.current === 'interrupted') {
+        done({ ok: false, error: (delta.error && delta.error.current) || 'interrupted' });
+      }
     };
     chrome.downloads.onChanged.addListener(onCh);
-    // Safety timeout: 30 min.
-    setTimeout(() => finish({ ok: false, error: 'timeout' }), 30 * 60 * 1000);
+    setTimeout(() => done({ ok: false, error: 'timeout' }), 60 * 60 * 1000);
   });
 }
 
 async function _mhDownloadOne(job) {
   const { playUrl, filename, quality } = job;
-  let tabId = null;
+  let tabId = null, blobUrl = null;
   try {
+    // 1) Open the playback page in a hidden tab and capture the signed MP4 URL.
     const tab = await chrome.tabs.create({ url: playUrl, active: false });
     tabId = tab.id;
     await new Promise(r => setTimeout(r, 3500));
     const signed = await _mhCaptureSignedUrl(tabId, quality);
-    if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג)' };
-    const donePromise = _mhWaitForDownload(filename, Date.now());
-    // Fire-and-forget in-page fetch → blob → anchor. The page holds the blob
-    // (Chrome spills large blobs to disk) until the browser finishes saving.
-    await chrome.scripting.executeScript({
-      target: { tabId }, world: 'MAIN', args: [signed, filename],
-      func: (u, fn) => {
-        window.__mhDl = 'fetching';
-        (async () => {
-          try {
-            // Cross-origin fetch from the zoom page to ssrweb. The signed URL
-            // is self-authorizing, so DON'T send credentials — credentials:
-            // 'include' on a cross-origin request requires the response to
-            // carry access-control-allow-credentials:true (it doesn't), which
-            // blocks reading the body. 'omit' + the URL's signature works.
-            const r = await fetch(u, { credentials: 'omit', cache: 'no-store' });
-            if (!r.ok) { window.__mhDl = 'http_' + r.status; return; }
-            const b = await r.blob();
-            const bu = URL.createObjectURL(b);
-            const a = document.createElement('a');
-            a.href = bu; a.download = fn; document.body.appendChild(a); a.click();
-            window.__mhDl = 'started_' + b.size;
-            setTimeout(() => { try { URL.revokeObjectURL(bu); a.remove(); } catch {} }, 5 * 60 * 1000);
-          } catch (e) { window.__mhDl = 'err_' + (e && e.message || e); }
-        })();
-        return true;
-      },
-    });
-    // Poll the in-page state until the blob is built + click fired (or error).
-    let state = 'fetching'; const t2 = Date.now();
-    while (Date.now() - t2 < 25 * 60 * 1000) {
-      await new Promise(r => setTimeout(r, 2000));
-      try { const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => window.__mhDl || '' }); state = result || ''; } catch {}
-      if (state.startsWith('started') || state.startsWith('http_') || state.startsWith('err')) break;
-    }
-    if (!state.startsWith('started')) return { error: 'fetch בדף נכשל: ' + state };
-    // Blob built + download triggered; wait for the browser to finish writing
-    // it to disk before we close the tab (closing revokes the blob).
-    const res = await donePromise;
-    return res.ok ? { ok: true, bytes: res.bytes } : { error: 'הורדה נכשלה: ' + res.error };
+    try { if (tabId) { await chrome.tabs.remove(tabId); tabId = null; } } catch {}
+    if (!signed) return { error: 'לא נתפס קישור וידאו (הנגן לא נטען או הקישור פג — סרוק מחדש סמוך ללחיצה)' };
+    // 2) Fetch the bytes in the offscreen doc (extension origin → no CORS).
+    await _mhEnsureOffscreen();
+    const resp = await _mhOffscreenFetch(signed);
+    if (!resp.ok) return { error: 'fetch נכשל (' + (resp.error || '?') + ')' };
+    blobUrl = resp.blobUrl;
+    // 3) Save the blob via chrome.downloads — a clean blob: URL, no signature
+    //    to mangle, no network/CORS/referer involved (local data → disk).
+    const downloadId = await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
+    const res = await _mhWaitForDownloadId(downloadId);
+    return res.ok ? { ok: true, bytes: res.bytes || resp.size } : { error: 'הורדה נכשלה: ' + res.error };
   } catch (e) {
     return { error: String(e && e.message || e) };
   } finally {
     if (tabId) { try { await chrome.tabs.remove(tabId); } catch {} }
+    if (blobUrl) { try { chrome.runtime.sendMessage({ type: 'mh-offscreen-revoke', blobUrl }); } catch {} }
   }
 }
 
@@ -436,9 +438,15 @@ async function _mhProcessQueue() {
   try {
     while (_mhDlQueue.length) {
       const job = _mhDlQueue.shift();
+      await _mhSetStatus({ state: 'running', filename: job.filename, remaining: _mhDlQueue.length });
       const res = await _mhDownloadOne(job);
-      if (res.ok) _mhNotify(`✅ ירד: ${job.filename}${res.bytes ? ` (${(res.bytes / 1048576).toFixed(0)}MB)` : ''}`, 'Moodle Hoarder — וידאו');
-      else _mhNotify(`❌ נכשל: ${job.filename} — ${res.error}`, 'Moodle Hoarder — וידאו');
+      if (res.ok) {
+        await _mhSetStatus({ state: 'done', filename: job.filename, bytes: res.bytes || 0 });
+        _mhNotify(`✅ ירד: ${job.filename}${res.bytes ? ` (${(res.bytes / 1048576).toFixed(0)}MB)` : ''}`, 'Moodle Hoarder — וידאו');
+      } else {
+        await _mhSetStatus({ state: 'error', filename: job.filename, error: res.error });
+        _mhNotify(`❌ נכשל: ${job.filename} — ${res.error}`, 'Moodle Hoarder — וידאו');
+      }
     }
   } finally { _mhDlBusy = false; }
 }

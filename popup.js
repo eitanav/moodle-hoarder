@@ -1354,7 +1354,7 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     for (const d of dlList) {
       chrome.runtime.sendMessage({ type: 'mh-download-rec', playUrl: d.playUrl, filename: d.filename, quality });
     }
-    setStatus(`\u{1F3A5} ${dlList.length} הורדות נכנסו לתור ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר שמושך את הוידאו ושומר אותו — לקובץ גדול זה ייקח דקות. תופיע התראה לכל הקלטה כשמסתיים. אל תסגור את הדפדפן עד אז.`);
+    setStatus(`\u{1F3A5} ${dlList.length} הורדות התחילו ברקע (אחת בכל פעם). לכל הקלטה ייפתח טאב נסתר לרגע, ואז הקובץ יופיע ב-chrome://downloads ויירד שם (לקובץ גדול זה דקות). תופיע התראה כשמסתיים. אפשר לסגור את הפופאפ.`);
     notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
   } finally {
     $('downloadZoomLinks').disabled = false;
