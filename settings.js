@@ -63,6 +63,13 @@ const SETTINGS_DEFAULTS = {
   // has many items and the popup needs to fit more on screen.
   compactMode: false,
 
+  // Smart section-name shortening (ROADMAP #17). When true, a section title
+  // like "תרגול 1 — תכונות זורמים ולחץ" is trimmed at the first " — " / " - " /
+  // ": " separator down to its leading label ("תרגול 1"). Affects both the
+  // picker labels and the ZIP folder names. Off by default — it's lossy, and
+  // some courses pack the meaningful part *after* the separator.
+  shortenSectionNames: false,
+
   // Max file size warning (MB). 0 = disabled. When > 0, the popup warns
   // before including files larger than this in the ZIP. The user can
   // still opt in; we just unselect them by default in the picker.

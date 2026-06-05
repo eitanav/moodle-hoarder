@@ -480,6 +480,22 @@ async function scanCoursesInActiveTab(tabId) {
 }
 
 // ========== Extraction (works on any Document) ==========
+// ROADMAP #17 — smart section-name shortening. Trim a section title at its
+// first " — " / " – " / " - " / ": " separator down to the leading label
+// ("תרגול 1 — תכונות זורמים ולחץ" → "תרגול 1"). Lossy, so it only runs when
+// the shortenSectionNames setting is on. Guards keep it from producing junk:
+// the separator must have real content on both sides, and a head that is only
+// digits/punctuation (e.g. "01") is rejected in favour of the full name.
+function shortenSectionName(name) {
+  if (!name) return name;
+  const m = name.match(/^(.*?\S)\s*(?:[—–-]|:)\s+\S/);
+  if (!m) return name;
+  const head = m[1].trim();
+  if (head.length < 2 || head.length === name.length) return name;
+  if (!/[^\d\s.()-]/.test(head)) return name; // bare number → keep full title
+  return head;
+}
+
 function extractCourse(doc) {
   const courseName = (doc.querySelector('.page-header-headings h1, header h1, h1')?.textContent
                       || doc.title || 'course').trim();
@@ -558,7 +574,8 @@ function extractCourse(doc) {
   };
 
   for (const sec of secEls) {
-    const sName = getSectionTitle(sec) || `קטע ${sections.length + 1}`;
+    let sName = getSectionTitle(sec) || `קטע ${sections.length + 1}`;
+    if (CACHED_SETTINGS?.shortenSectionNames) sName = shortenSectionName(sName);
     const items = collect(sec, sName);
     if (items.length) {
       const sIdx = sections.length;
