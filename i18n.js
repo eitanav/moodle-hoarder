@@ -40,7 +40,7 @@ const MH_STRINGS = {
     'btn.only.new': 'בחר רק חדשים',
 
     // Initial hint
-    'initial.hint': 'פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".',
+    'initial.hint': 'פתח דף קורס במודל או דף "הקורסים שלי", ולחץ "סרוק".',
 
     // Picker labels
     'picker.search.placeholder': 'חיפוש...',
@@ -57,7 +57,7 @@ const MH_STRINGS = {
     // Deadlines view
     'deadlines.found.prefix': 'נמצאו',
     'deadlines.found.suffix': 'מטלות (ללא המוסתרות).',
-    'deadlines.help.ical': 'סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.',
+    'deadlines.help.ical': 'סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ליומן (Google Calendar, Outlook, Apple Calendar).',
     'deadlines.help.mycourses': '💡 כדי להוריד קבצי קורסים — עבור לדף "הקורסים שלי" ולחץ שוב על אייקון התוסף.',
 
     // Zoom view
