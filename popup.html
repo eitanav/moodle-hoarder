@@ -355,7 +355,11 @@
   #log .err { color: var(--err); }
   #log .ok { color: var(--ok); }
 
-  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; unicode-bidi: plaintext; }
+  /* code בתוך טקסט עברי — בידוד כיווני כדי למנוע ערבוב BiDi */
+  code { direction: ltr; unicode-bidi: isolate; font-size: 10px; }
+  /* אזורי סטטוס דינמי — כל שורה מחליטה על כיוונה בעצמה */
+  #status, #log { unicode-bidi: plaintext; }
 
 </style>
 </head>
@@ -372,7 +376,7 @@
 <main>
   <div id="initial">
     <button id="scan" data-i18n="btn.scan">סרוק</button>
-    <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל (course/view.php) או דף הקורסים שלי (my/courses.php) ולחץ "סרוק".</div>
+    <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל או דף "הקורסים שלי", ולחץ "סרוק".</div>
     <div id="skeleton" class="mh-skeleton">
       <div class="row" style="width:70%"></div>
       <div class="row" style="width:90%"></div>
@@ -436,7 +440,7 @@
     <div class="summary"><span data-i18n="deadlines.found.prefix">נמצאו</span> <span class="count" id="totDeadlines">0</span> <span data-i18n="deadlines.found.suffix">מטלות (ללא המוסתרות).</span></div>
     <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
     <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
-    <div class="hint" style="margin-top:6px;" data-i18n="deadlines.help.ical">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ל-Google Calendar / Outlook / Apple Calendar.</div>
+    <div class="hint" style="margin-top:6px;" data-i18n="deadlines.help.ical">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ליומן (Google Calendar, Outlook, Apple Calendar).</div>
     <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
     <div class="row-btns">
       <button class="secondary" id="backDeadlines" data-i18n="btn.back">חזור</button>
@@ -458,18 +462,18 @@
       <button id="downloadZoomLinks" style="flex:1; min-width:130px;">📄 קישורים ותמלילים</button>
       <button id="downloadZoomVideos" style="flex:1; min-width:130px;">🎥 הורד סרטונים (MP4)</button>
     </div>
-    <div class="hint" style="margin-top:6px;">📄 = קובץ ZIP עם הקישורים והתמלילים (מהיר). 🎥 = הקלטות הוידאו עצמן כקובצי MP4 (גדול — 200MB-2GB לכל אחת, ממשיך ברקע גם אם תסגור). איכות הווידאו נלקחת ממה ש-Zoom חושף בפועל; אם Windows לא פותח — נסה VLC.</div>
+    <div class="hint" style="margin-top:6px;">קישורים ותמלילים 📄 — ZIP מהיר עם הכל. סרטונים 🎥 — קבצי MP4 של ההקלטות (200MB עד 2GB לכל אחת), ממשיך ברקע גם אחרי סגירה. הווידאו יורד באיכות הגבוהה ביותר ש-Zoom חושף. אם Windows לא מצליח לפתוח — נסה VLC.</div>
     <details class="advanced-debug">
       <summary>🩺 משהו לא עובד? פתח כלי אבחון</summary>
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer; color:var(--muted); margin:4px 0 8px;">
         <input type="checkbox" id="zoomDebugNetwork">
-        <span>🎬 תלכוד debug של network (איטי, ~25 שניות לכל הקלטה)</span>
+        <span>🎬 תיעוד בקשות רשת לאיתור תקלות (איטי — כ-25 שניות לכל הקלטה)</span>
       </label>
       <div class="row-btns" style="margin-top:8px;">
         <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה קצרה</button>
         <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק</button>
       </div>
-      <div class="hint" style="margin-top:6px;">פתח רק כשמשהו נכשל. הדיאגנוסטיקה בודקת את הצנרת; המחקר העמוק מקליט network trace עם <code>chrome.debugger</code>.</div>
+      <div class="hint" style="margin-top:6px;">פתח רק כשמשהו נכשל. דיאגנוסטיקה — בודקת שלב אחר שלב את כל הצנרת. מחקר עמוק — מקליט trace רשת מלא באמצעות <code dir="ltr">chrome.debugger</code>.</div>
       <div id="zoomDiagResult" style="display:none; margin-top:8px;">
         <div style="display:flex; gap:6px; margin-bottom:4px;">
           <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
