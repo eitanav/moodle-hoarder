@@ -63,6 +63,14 @@ const SETTINGS_DEFAULTS = {
   // has many items and the popup needs to fit more on screen.
   compactMode: false,
 
+  // Auto-rename PDFs by their embedded title (ROADMAP #21). When a PDF lands
+  // with a generic filename (1.pdf, unnamed.pdf, "Microsoft Word - doc.pdf"...)
+  // we read the title from the PDF's own metadata (Info /Title or XMP) — no
+  // pdf.js, no AI — and rename the file to it. Off by default: it only ever
+  // touches files whose name is already uninformative, but renaming is a
+  // visible change, so the user opts in. See pdf-title.js.
+  renamePdfByTitle: false,
+
   // Max file size warning (MB). 0 = disabled. When > 0, the popup warns
   // before including files larger than this in the ZIP. The user can
   // still opt in; we just unselect them by default in the picker.

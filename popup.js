@@ -2842,7 +2842,7 @@ async function fetchResource(item) {
   // second-guess them with another size check mid-download.
   const blob = await res.blob();
   const fn = filenameFromResponse(res) || sanitizeFilename(item.name) || `resource_${item.id}`;
-  return [{ path: fn, blob }];
+  return [{ path: await maybePdfRename(fn, blob), blob }];
 }
 
 async function fetchFolder(item) {
@@ -2871,7 +2871,7 @@ async function fetchFolder(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(a.href.split('/').pop()) || 'file';
-      out.push({ path: `${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${await maybePdfRename(fn, blob)}`, blob });
     } catch {}
   }
   if (!out.length) throw new Error(t('err.folder.empty'));
@@ -2896,7 +2896,7 @@ async function fetchAssign(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(url.split('/').pop()) || 'file';
-      out.push({ path: `${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${await maybePdfRename(fn, blob)}`, blob });
     } catch {}
   }
 
@@ -2911,7 +2911,7 @@ async function fetchAssign(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(url.split('/').pop()) || 'file';
-      out.push({ path: `${folder}/_הגשות שלי/${fn}`, blob });
+      out.push({ path: `${folder}/_הגשות שלי/${await maybePdfRename(fn, blob)}`, blob });
     } catch {}
   }
 
@@ -3469,7 +3469,7 @@ async function fetchPage(item) {
       if (!r.ok) continue;
       const blob = await r.blob();
       const fn = filenameFromResponse(r) || decodeURIComponent(a.href.split('/').pop()) || 'file';
-      out.push({ path: `${folder}/${fn}`, blob });
+      out.push({ path: `${folder}/${await maybePdfRename(fn, blob)}`, blob });
     } catch {}
   }
   if (content.textContent.trim()) {
@@ -3625,6 +3625,23 @@ function sanitizeFilename(name) {
     .replace(/[. ]+$/, '')
     .trim()
     .slice(0, 120);
+}
+// ROADMAP #21 — if a PDF arrived with a generic filename and the user opted
+// in, recover a real title from the PDF's own metadata (see pdf-title.js) and
+// rename the file. Pure best-effort: any failure (not a PDF, no metadata,
+// title still generic, oversized) returns the original name unchanged.
+async function maybePdfRename(fn, blob) {
+  try {
+    if (!CACHED_SETTINGS?.renamePdfByTitle) return fn;
+    if (typeof extractPdfTitle !== 'function' || typeof isGenericPdfName !== 'function') return fn;
+    if (!/\.pdf$/i.test(fn) || !isGenericPdfName(fn)) return fn;
+    if (!blob || blob.size > 64 * 1024 * 1024) return fn; // skip huge files
+    const title = extractPdfTitle(new Uint8Array(await blob.arrayBuffer()));
+    if (!title) return fn;
+    const clean = sanitizeFilename(title);
+    if (!clean || clean.length < 3 || isGenericPdfName(clean + '.pdf')) return fn;
+    return clean + '.pdf';
+  } catch { return fn; }
 }
 function uniquePath(used, path) {
   if (!used.has(path)) { used.add(path); return path; }
