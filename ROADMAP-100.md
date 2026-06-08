@@ -81,10 +81,10 @@
 
 ### V3 — תמלול והכלי המקומי
 
-- [ ] **Local Companion לתמלול Whisper בעברית** (XL)
+- [x] **Local Companion לתמלול Whisper בעברית** (XL) — **MVP מומש ב-`transcriber/`**
   - כלי מקומי נפרד שמקבל תיקיית MP4 שהורדה מהתוסף ומפיק TXT/SRT/VTT.
-  - MVP: CLI עם `faster-whisper`/`whisper.cpp` + ffmpeg.
-  - בהמשך: GUI, cache, progress, בחירת מודל, חיפוש בתוך קורס, ואולי Native Messaging מול התוסף.
+  - MVP: CLI + GUI עם `faster-whisper`, בחירת מודל, CUDA/CPU, ייצוא TXT/SRT/VTT/JSON.
+  - בהמשך: chunking+resume להקלטות ארוכות, diarization, חיבור אוטומטי ל-ZIP/recordings של התוסף, Native Messaging.
   - להשאיר את התוסף אחראי על Moodle/Zoom/downloads, ואת הכלי המקומי אחראי על CPU/GPU/Whisper.
 
 ---
