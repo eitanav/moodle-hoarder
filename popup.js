@@ -74,6 +74,7 @@ function renderZoomVideoStatus(st) {
   const finished = completed + failed;
   if (total > 0) setProgress(Math.min(finished, total), total);
   const size = st.bytes ? ` · ${formatSize(st.bytes)}` : '';
+  const cancelBtn = document.getElementById('cancelZoomDownload');
   if (st.state === 'running') {
     const idx = st.currentIndex || (finished + 1);
     setStatus(`🎥 מוריד סרטונים: ${idx}/${total} — ${st.filename || ''} (${completed} הסתיימו, ${failed} נכשלו)${size}`);
@@ -83,10 +84,17 @@ function renderZoomVideoStatus(st) {
     setStatus(`🎥 ${completed}/${total} ירדו (${failed} נכשלו)${size}`);
   } else if (st.state === 'item-error') {
     setStatus(`🎥 ${completed}/${total} ירדו, ${failed} נכשלו — ${st.filename || ''}: ${st.error || ''}`);
+  } else if (st.state === 'cancelled') {
+    setProgress(0, 0);
+    setStatus(`⏹ הורדה בוטלה — ${completed}/${total} ירדו${size}`);
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    return;
   } else if (st.state === 'complete') {
     setProgress(total, total);
     const label = failed ? `הסתיים חלקית: ${completed}/${total} ירדו, ${failed} נכשלו` : `כל ${total} הסרטונים ירדו`;
     setStatus(`✅ ${label}${size}. אם Windows לא פותח את הקובץ — נסה VLC.`);
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    return;
   }
 }
 function showView(name) {
@@ -396,6 +404,10 @@ async function scanCourse(courseUrl) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const data = extractCourse(doc);
   data.courseUrl = courseUrl;
+  // Fall back to URL param if DOM extraction didn't find the course ID.
+  if (!data.courseId) {
+    try { data.courseId = new URL(courseUrl).searchParams.get('id') || ''; } catch {}
+  }
   data.prevSeen = await loadSeen(data.courseId);
   return data;
 }
@@ -1349,6 +1361,13 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     });
     setStatus(`🎥 ${dlList.length} הורדות נכנסו לתור. ההורדה רצה ברקע אחת בכל פעם — אפשר לסגור את הפופאפ.`);
     notify('Moodle Hoarder', `Zoom: ${dlList.length} הורדות וידאו בתור`);
+    const cancelBtn = document.getElementById('cancelZoomDownload');
+    if (cancelBtn) {
+      cancelBtn.textContent = '⏹ בטל הורדה';
+      cancelBtn.dataset.mode = 'cancel';
+      cancelBtn.style.pointerEvents = '';
+      cancelBtn.style.display = 'block';
+    }
   } finally {
     $('downloadZoomLinks').disabled = false;
     $('downloadZoomVideos').disabled = false;
@@ -1752,9 +1771,48 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.mhLastResearch?.newValue) mhShowResearchResult(changes.mhLastResearch.newValue);
   if (changes.mhDlStatus?.newValue) renderZoomVideoStatus(changes.mhDlStatus.newValue);
 });
-chrome.storage.local.get(['mhLastResearch', 'mhDlStatus']).then(s => {
+
+document.getElementById('cancelZoomDownload')?.addEventListener('click', async function () {
+  const btn = this;
+  if (btn.dataset.mode === 'dismiss') {
+    try { await chrome.storage.local.remove('mhDlStatus'); } catch {}
+    btn.style.display = 'none';
+    setStatus('');
+    setProgress(0, 0);
+  } else {
+    btn.textContent = 'מבטל...';
+    btn.style.pointerEvents = 'none';
+    try { chrome.runtime.sendMessage({ type: 'mh-cancel-downloads' }); } catch {}
+    setStatus('⏹ מבטל — ממתין לסיום ההורדה הנוכחית...');
+  }
+});
+chrome.storage.local.get(['mhLastResearch', 'mhDlStatus']).then(async s => {
   if (s.mhLastResearch?.json) mhShowResearchResult(s.mhLastResearch);
-  if (s.mhDlStatus?.kind === 'zoom-videos' && s.mhDlStatus.state !== 'complete') renderZoomVideoStatus(s.mhDlStatus);
+  const dlSt = s.mhDlStatus;
+  if (dlSt?.kind === 'zoom-videos' && dlSt.state !== 'complete' && dlSt.state !== 'cancelled') {
+    renderZoomVideoStatus(dlSt);
+    const cancelBtn = document.getElementById('cancelZoomDownload');
+    if (cancelBtn) {
+      // Query the SW to know if this download is actually still in progress.
+      let swBusy = false;
+      try {
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ type: 'mh-dl-status-query' }, (resp) => {
+            if (!chrome.runtime.lastError) swBusy = !!(resp?.busy);
+            resolve();
+          });
+        });
+      } catch {}
+      if (swBusy) {
+        cancelBtn.textContent = '⏹ בטל הורדה';
+        cancelBtn.dataset.mode = 'cancel';
+      } else {
+        cancelBtn.textContent = '✕ נקה סטטוס תקוע';
+        cancelBtn.dataset.mode = 'dismiss';
+      }
+      cancelBtn.style.display = 'block';
+    }
+  }
 }).catch(() => {});
 
 // Build the text body Zoom recording lists use — kept identical to the

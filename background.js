@@ -55,6 +55,16 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup?.addListener(async () => {
   await rebuildContextMenus();
   updateBadge();
+  // Clear any download status that was left in 'running' state from the
+  // previous Chrome session (computer restart / browser kill). The SW starts
+  // fresh — queue and busy flag are reset — so a stale 'running' status in
+  // storage no longer reflects reality.
+  try {
+    const s = await chrome.storage.local.get('mhDlStatus');
+    if (s.mhDlStatus && s.mhDlStatus.state !== 'complete' && s.mhDlStatus.state !== 'cancelled') {
+      await chrome.storage.local.remove('mhDlStatus');
+    }
+  } catch {}
 });
 
 // Whenever the user changes settings (in options.html), rebuild the menu so
@@ -310,6 +320,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 const _mhDlQueue = [];
 let _mhDlBusy = false;
 let _mhDlBatch = null;
+let _mhCancelRequested = false;
 
 function _mhEnsureBatch(totalHint = 0, meta = {}) {
   if (!_mhDlBatch || (!_mhDlBusy && _mhDlQueue.length === 0 && _mhDlBatch.state === 'complete')) {
@@ -547,8 +558,9 @@ async function _mhDownloadOne(job) {
 async function _mhProcessQueue() {
   if (_mhDlBusy) return;
   _mhDlBusy = true;
+  _mhCancelRequested = false;
   try {
-    while (_mhDlQueue.length) {
+    while (_mhDlQueue.length && !_mhCancelRequested) {
       const job = _mhDlQueue.shift();
       const batch = _mhEnsureBatch();
       const currentIndex = batch.completed + batch.failed + 1;
@@ -583,25 +595,46 @@ async function _mhProcessQueue() {
       }
     }
     if (_mhDlBatch) {
-      _mhDlBatch.state = 'complete';
-      _mhDlBatch.finishedAt = Date.now();
-      const status = _mhDlBatch.failed ? (_mhDlBatch.completed ? 'partial' : 'failed') : 'success';
-      await _mhSetStatus({
-        kind: 'zoom-videos', state: 'complete', batchId: _mhDlBatch.id, status,
-        total: _mhDlBatch.total, completed: _mhDlBatch.completed, failed: _mhDlBatch.failed,
-        remaining: 0, bytes: _mhDlBatch.bytes, courseName: _mhDlBatch.courseName || '', sourceUrl: _mhDlBatch.sourceUrl || '',
-      });
-      await _mhAppendHistory({
-        type: 'zoom-videos', title: _mhDlBatch.courseName || 'Zoom videos', sourceUrl: _mhDlBatch.sourceUrl || '',
-        startedAt: _mhDlBatch.startedAt, finishedAt: _mhDlBatch.finishedAt, status,
-        itemCount: _mhDlBatch.total, successCount: _mhDlBatch.completed, failedCount: _mhDlBatch.failed,
-        bytes: _mhDlBatch.bytes, files: _mhDlBatch.files.slice(0, 50), errors: _mhDlBatch.errors.slice(0, 20),
-      });
+      if (_mhCancelRequested) {
+        _mhDlBatch.state = 'cancelled';
+        _mhDlBatch.finishedAt = Date.now();
+        await _mhSetStatus({
+          kind: 'zoom-videos', state: 'cancelled', batchId: _mhDlBatch.id,
+          total: _mhDlBatch.total, completed: _mhDlBatch.completed, failed: _mhDlBatch.failed,
+          remaining: 0, bytes: _mhDlBatch.bytes, courseName: _mhDlBatch.courseName || '', sourceUrl: _mhDlBatch.sourceUrl || '',
+        });
+      } else {
+        _mhDlBatch.state = 'complete';
+        _mhDlBatch.finishedAt = Date.now();
+        const status = _mhDlBatch.failed ? (_mhDlBatch.completed ? 'partial' : 'failed') : 'success';
+        await _mhSetStatus({
+          kind: 'zoom-videos', state: 'complete', batchId: _mhDlBatch.id, status,
+          total: _mhDlBatch.total, completed: _mhDlBatch.completed, failed: _mhDlBatch.failed,
+          remaining: 0, bytes: _mhDlBatch.bytes, courseName: _mhDlBatch.courseName || '', sourceUrl: _mhDlBatch.sourceUrl || '',
+        });
+        await _mhAppendHistory({
+          type: 'zoom-videos', title: _mhDlBatch.courseName || 'Zoom videos', sourceUrl: _mhDlBatch.sourceUrl || '',
+          startedAt: _mhDlBatch.startedAt, finishedAt: _mhDlBatch.finishedAt, status,
+          itemCount: _mhDlBatch.total, successCount: _mhDlBatch.completed, failedCount: _mhDlBatch.failed,
+          bytes: _mhDlBatch.bytes, files: _mhDlBatch.files.slice(0, 50), errors: _mhDlBatch.errors.slice(0, 20),
+        });
+      }
     }
+    _mhCancelRequested = false;
   } finally { _mhDlBusy = false; }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'mh-cancel-downloads') {
+    _mhCancelRequested = true;
+    _mhDlQueue.length = 0;
+    sendResponse?.({ ok: true });
+    return true;
+  }
+  if (msg?.type === 'mh-dl-status-query') {
+    sendResponse?.({ busy: _mhDlBusy, queueLength: _mhDlQueue.length });
+    return true;
+  }
   if (msg?.type === 'mh-download-recs' && Array.isArray(msg.jobs) && msg.jobs.length) {
     console.log('[MH] mh-download-recs received:', msg.jobs.length, 'jobs');
     _mhEnsureBatch(msg.jobs.length, { courseName: msg.courseName || '', sourceUrl: msg.sourceUrl || '' });
