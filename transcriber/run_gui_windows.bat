@@ -10,7 +10,7 @@ if not exist .venv\Scripts\activate.bat (
 
 call .venv\Scripts\activate.bat
 
-python -c "import faster_whisper" >nul 2>nul
+python -c "import faster_whisper, imageio_ffmpeg" >nul 2>nul
 if errorlevel 1 (
   echo [Moodle Hoarder Transcriber] Installing missing Python dependencies...
   python -m pip install -r requirements.txt

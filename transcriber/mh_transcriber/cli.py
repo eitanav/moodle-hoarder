@@ -24,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--beam-size", default=5, type=int, help="Higher can improve quality but is slower")
     parser.add_argument("--diagnose-gpu", action="store_true", help="Print CUDA/NVIDIA diagnostics and exit")
+    parser.add_argument(
+        "--no-preprocess-audio",
+        action="store_true",
+        help="Skip the ffmpeg WAV preparation step and pass the input directly to faster-whisper",
+    )
     return parser
 
 
@@ -50,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         compute_type=args.compute_type,
         beam_size=args.beam_size,
         progress=log,
+        preprocess_audio=not args.no_preprocess_audio,
     )
     for kind, path in paths.items():
         print(f"{kind}: {path}")

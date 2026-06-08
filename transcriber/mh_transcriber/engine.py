@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 import importlib.util
 from pathlib import Path
+import tempfile
 import sys
 from typing import Literal
 
+from .audio import prepare_audio_for_transcription
 from .diagnostics import log_cuda_diagnostics
 from .formatters import write_outputs
 
@@ -43,11 +45,13 @@ def transcribe_file(
     compute_type: ComputeType = "auto",
     beam_size: int = 5,
     progress: ProgressCallback | None = None,
+    preprocess_audio: bool = True,
 ) -> dict[str, Path]:
     """Transcribe one media file and export txt/srt/vtt/json files.
 
-    faster-whisper uses PyAV internally, so common video containers such as MP4
-    can be passed directly without a separate ffmpeg executable in most setups.
+    By default, media is first converted to a mono 16 kHz WAV with ffmpeg. This
+    makes long MP4/M4A inputs more predictable and provides progress before the
+    first Whisper segment is decoded.
     """
 
     input_path = Path(input_path).expanduser().resolve()
@@ -80,27 +84,40 @@ def transcribe_file(
 
     if progress:
         progress("Model loaded. Preparing audio and starting transcription...")
-        progress(f"Transcribing {input_path.name}...")
 
-    segments_iter, info = model.transcribe(
-        str(input_path),
-        language=language or None,
-        beam_size=beam_size,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
-    )
+    with tempfile.TemporaryDirectory(prefix="mh-transcriber-") as tmp:
+        transcription_input = input_path
+        if preprocess_audio:
+            transcription_input = prepare_audio_for_transcription(
+                input_path=input_path,
+                work_dir=Path(tmp),
+                progress=progress,
+            )
+        elif progress:
+            progress("Audio preprocessing is disabled; passing media directly to faster-whisper.")
 
-    duration = getattr(info, "duration", None)
-    if progress and duration:
-        progress(f"Audio duration: {duration / 60:0.1f} minutes. Progress appears as segments are decoded.")
-
-    # Materialize the generator so we can write all output formats.
-    segments = []
-    for segment in segments_iter:
-        segments.append(segment)
         if progress:
-            percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
-            progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text.strip()[:80]}")
+            progress(f"Transcribing {input_path.name}...")
+
+        segments_iter, info = model.transcribe(
+            str(transcription_input),
+            language=language or None,
+            beam_size=beam_size,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+        )
+
+        duration = getattr(info, "duration", None)
+        if progress and duration:
+            progress(f"Audio duration: {duration / 60:0.1f} minutes. Progress appears as segments are decoded.")
+
+        # Materialize the generator so we can write all output formats.
+        segments = []
+        for segment in segments_iter:
+            segments.append(segment)
+            if progress:
+                percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
+                progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text.strip()[:80]}")
 
     if progress:
         progress("Writing transcript files...")
