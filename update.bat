@@ -26,7 +26,7 @@ git fetch origin
 echo.
 echo Forcing local files to EXACTLY match GitHub main ^(discards local edits^)...
 git reset --hard origin/main
-git clean -fd
+git clean -fd -e .venv/ -e .venv/** -e transcriber/.venv/ -e transcriber/.venv/**
 echo.
 echo --------------------------------------------
 echo Updated. Installed version is now:
