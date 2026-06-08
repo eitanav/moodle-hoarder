@@ -1,0 +1,87 @@
+# Moodle Hoarder Transcriber MVP
+
+<div dir="rtl">
+
+כלי תמלול מקומי ונפרד מהתוסף: גוררים/בוחרים הקלטת קורס, בוחרים מודל Whisper, ומקבלים תמלול עברי בפורמטים שמתאימים גם לבן אדם וגם ל-LLM.
+
+> סטטוס: MVP ראשון לבדיקה. לא נוגע בקוד הורדת ה-Zoom של התוסף.
+
+## מה זה מוציא
+
+לכל קובץ `lecture.mp4` נוצרת תיקיית `transcripts/` עם:
+
+- `lecture.txt` — טקסט קריא עם timestamps.
+- `lecture.srt` — כתוביות SubRip.
+- `lecture.vtt` — כתוביות WebVTT.
+- `lecture.json` — JSON עם schema, שם מקור, מודל, שפה ו-segments עם `start`/`end`/`text`.
+
+## האם RTX 3070 Laptop מספיק?
+
+כן. ברוב המחשבים עם NVIDIA RTX 3070 Laptop יש בדרך כלל 8GB VRAM, וזה אמור להספיק טוב ל-`large-v3-turbo` עם `cuda` + `float16`. אם יש שגיאת זיכרון, נסה לפי הסדר:
+
+1. להשאיר מודל `large-v3-turbo` ולהחליף `Compute` ל-`int8_float16`.
+2. לעבור למודל `medium`.
+3. לעבור ל-`Device=cpu` ו-`Compute=int8` — איטי יותר אבל אמור לעבוד.
+
+## התקנה ב-Windows
+
+פתח PowerShell בתוך תיקיית הרפו:
+
+```powershell
+cd transcriber
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+> בפעם הראשונה המודל יורד מהאינטרנט. אחרי זה הוא נשמר ב-cache של Hugging Face/CTranslate2.
+
+## הרצת GUI
+
+```powershell
+cd transcriber
+.\.venv\Scripts\Activate.ps1
+python run_gui.py
+```
+
+ברירת המחדל מותאמת למחשב שלך: `Device=cuda`, `Compute=float16`, מודל `large-v3-turbo`, שפה `he`.
+
+אם `tkinterdnd2` מותקן, אפשר לגרור קובץ לשדה. גם בלי drag-and-drop אפשר ללחוץ "בחר קובץ".
+
+## הרצת CLI
+
+```powershell
+cd transcriber
+.\.venv\Scripts\Activate.ps1
+python transcribe.py "C:\path\to\lecture.mp4" --device cuda --compute-type float16 --model large-v3-turbo --language he
+```
+
+אפשר לבחור תיקיית פלט:
+
+```powershell
+python transcribe.py "C:\path\to\lecture.mp4" --out "C:\path\to\course\transcripts"
+```
+
+## מודלים מומלצים
+
+- `large-v3-turbo` — ברירת מחדל מומלצת: איכות טובה ומהיר יותר מ-large-v3.
+- `large-v3` — איכות גבוהה יותר בחלק מהמקרים, כבד יותר.
+- `medium` — fallback טוב אם חסר VRAM.
+- `small` / `base` — בדיקות מהירות או מחשבים חלשים.
+
+## מגבלות MVP
+
+- אין עדיין צ'אט על הקורס.
+- אין עדיין diarization / זיהוי דוברים.
+- אין עדיין חיבור אוטומטי ל-ZIP/recordings של התוסף.
+- אין עדיין resume ל-chunks ארוכים. זה השלב הבא לפני תמלול מאסיבי של עשרות שעות.
+
+## השלב הבא המומלץ
+
+1. לבדוק על הקלטה אמיתית של 10–20 דקות.
+2. לבדוק על הקלטה של שעה.
+3. אם האיכות טובה — להוסיף chunking+resume.
+4. אחר כך להוסיף ניקוי/סיכום עם LLM ו-JSON שמתאים ל"שאל את הקורס".
+
+</div>
