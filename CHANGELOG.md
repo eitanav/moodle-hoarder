@@ -4,6 +4,17 @@
 
 ---
 
+## v2.4.0 — Resume לתמלולים ארוכים (Transcriber)
+
+- **חידוש תמלול שנקטע** — כל סגמנט שמתומלל נשמר מיד ל-checkpoint (`<שם>.transcribe-progress.jsonl`) ליד הפלט. אם התמלול נופל באמצע (סגירת חלון, נפילת CUDA, הפסקת חשמל) — הרצה חוזרת על אותו קובץ ממשיכה מהסגמנט האחרון במקום להתחיל מאפס. קריטי לתמלול של עשרות שעות.
+- **`checkpoint.py`** — כתיבת JSONL עם flush אחרי כל סגמנט; טעינה מזהה התאמה לפי מקור (size+mtime), מודל ושפה; שורה אחרונה חתוכה (נפילה באמצע כתיבה) מטופלת בחן — שומרים את מה שכבר נכתב.
+- **`audio.py`** — `prepare_audio_for_transcription` תומך ב-`start_seconds`: ffmpeg עושה input-seek (`-ss` לפני `-i`) כדי לא לפענח מחדש את מה שכבר תומלל. הפלט החתום מקבל אופסט בחזרה לזמנים אבסולוטיים.
+- **ה-checkpoint נמחק** רק כשכל קבצי התמלול (txt/srt/vtt/json) נכתבו בהצלחה.
+- **`--no-resume`** ב-CLI לכיבוי המנגנון. resume דורש את שלב ה-ffmpeg, ולכן מושבת אוטומטית עם `--no-preprocess-audio`.
+- **בדיקות** — `test_checkpoint.py` (roundtrip, אי-התאמת מודל/שפה/מקור, שורה חתוכה, append ללא כפילות header) ובניית פקודת ffmpeg עם/בלי seek ב-`test_audio.py`.
+
+---
+
 ## v2.3.1 — Heartbeat בטעינת מודל + הגנת .venv ב-update.bat
 
 - **Heartbeat בטעינת מודל** — כל 30 שניות בזמן טעינה ראשונה מדפיס "Still loading model X (Y min elapsed)..." — הגיוי לא נראה תקוע

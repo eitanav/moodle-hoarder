@@ -12,8 +12,14 @@ import time
 from typing import Literal
 
 from .audio import prepare_audio_for_transcription
+from .checkpoint import (
+    CheckpointWriter,
+    build_header,
+    checkpoint_path_for,
+    load_checkpoint,
+)
 from .diagnostics import log_cuda_diagnostics
-from .formatters import write_outputs
+from .formatters import TranscriptSegment, write_outputs
 
 ComputeType = Literal["auto", "float16", "int8_float16", "int8", "float32"]
 Device = Literal["auto", "cuda", "cpu"]
@@ -90,12 +96,19 @@ def transcribe_file(
     beam_size: int = 5,
     progress: ProgressCallback | None = None,
     preprocess_audio: bool = True,
+    resume: bool = True,
 ) -> dict[str, Path]:
     """Transcribe one media file and export txt/srt/vtt/json files.
 
     By default, media is first converted to a mono 16 kHz WAV with ffmpeg. This
     makes long MP4/M4A inputs more predictable and provides progress before the
     first Whisper segment is decoded.
+
+    With ``resume`` enabled (default), every decoded segment is appended to a
+    checkpoint next to the output. If transcription is interrupted, running it
+    again picks up from the last decoded segment instead of starting over. Resume
+    relies on the ffmpeg preprocessing step to trim already-transcribed audio, so
+    it is automatically skipped when ``preprocess_audio`` is False.
     """
 
     input_path = Path(input_path).expanduser().resolve()
@@ -103,81 +116,147 @@ def transcribe_file(
         raise FileNotFoundError(input_path)
 
     output_dir = Path(output_dir or input_path.parent / "transcripts").expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
     resolved_compute = _resolve_compute_type(device, compute_type)
 
-    with tempfile.TemporaryDirectory(prefix="mh-transcriber-") as tmp:
-        transcription_input = input_path
-        if preprocess_audio:
-            transcription_input = prepare_audio_for_transcription(
-                input_path=input_path,
-                work_dir=Path(tmp),
+    use_checkpoint = preprocess_audio and resume
+    checkpoint_path = checkpoint_path_for(output_dir, input_path.stem)
+    prior_segments: list[TranscriptSegment] = []
+    resume_offset = 0.0
+    if use_checkpoint:
+        loaded = load_checkpoint(
+            checkpoint_path,
+            source=input_path,
+            model_name=model_name,
+            language=language,
+        )
+        if loaded:
+            prior_segments, resume_offset = loaded
+            if progress:
+                progress(
+                    f"Found an unfinished transcript checkpoint: resuming from {resume_offset / 60:0.1f} min "
+                    f"({len(prior_segments)} segments already decoded)."
+                )
+        else:
+            # Drop any stale/mismatched checkpoint so we start a clean one.
+            checkpoint_path.unlink(missing_ok=True)
+    elif progress and resume:
+        progress("Resume needs ffmpeg preprocessing; checkpointing is disabled for this run.")
+
+    writer: CheckpointWriter | None = None
+    new_segments: list[TranscriptSegment] = []
+    info = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="mh-transcriber-") as tmp:
+            transcription_input = input_path
+            if preprocess_audio:
+                transcription_input = prepare_audio_for_transcription(
+                    input_path=input_path,
+                    work_dir=Path(tmp),
+                    start_seconds=resume_offset,
+                    progress=progress,
+                )
+            elif progress:
+                progress("Audio preprocessing is disabled; passing media directly to faster-whisper.")
+
+            if progress:
+                progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
+                progress("First run can take several minutes because the model may be downloading and initializing.")
+            if device in {"cuda", "auto"}:
+                log_cuda_diagnostics(progress)
+
+            if importlib.util.find_spec("faster_whisper") is None:
+                requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
+                raise RuntimeError(
+                    "Missing dependency faster-whisper. "
+                    "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
+                    f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
+                )
+
+            from faster_whisper import WhisperModel
+
+            model = _load_whisper_model_with_heartbeat(
+                model_cls=WhisperModel,
+                model_name=model_name,
+                device=device,
+                compute_type=resolved_compute,
                 progress=progress,
             )
-        elif progress:
-            progress("Audio preprocessing is disabled; passing media directly to faster-whisper.")
 
-        if progress:
-            progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
-            progress("First run can take several minutes because the model may be downloading and initializing.")
-        if device in {"cuda", "auto"}:
-            log_cuda_diagnostics(progress)
+            if device in {"cuda", "auto"}:
+                log_cuda_diagnostics(progress)
 
-        if importlib.util.find_spec("faster_whisper") is None:
-            requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
-            raise RuntimeError(
-                "Missing dependency faster-whisper. "
-                "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
-                f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
+            if progress:
+                progress("Model loaded. Starting transcription...")
+                progress(f"Transcribing {input_path.name}...")
+
+            if use_checkpoint:
+                writer = CheckpointWriter(
+                    checkpoint_path,
+                    build_header(
+                        source=input_path,
+                        model_name=model_name,
+                        language=language,
+                    ),
+                )
+
+            segments_iter, info = model.transcribe(
+                str(transcription_input),
+                language=language or None,
+                beam_size=beam_size,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500},
             )
 
-        from faster_whisper import WhisperModel
+            # info.duration is the duration of the (possibly trimmed) input, so the
+            # full-recording length is the resume offset plus what is left to decode.
+            tail_duration = getattr(info, "duration", None)
+            full_duration = (resume_offset + tail_duration) if tail_duration else None
+            if progress and full_duration:
+                progress(
+                    f"Audio duration: {full_duration / 60:0.1f} minutes. Progress appears as segments are decoded."
+                )
 
-        model = _load_whisper_model_with_heartbeat(
-            model_cls=WhisperModel,
-            model_name=model_name,
-            device=device,
-            compute_type=resolved_compute,
-            progress=progress,
-        )
-
-        if device in {"cuda", "auto"}:
-            log_cuda_diagnostics(progress)
-
-        if progress:
-            progress("Model loaded. Starting transcription...")
-            progress(f"Transcribing {input_path.name}...")
-
-        segments_iter, info = model.transcribe(
-            str(transcription_input),
-            language=language or None,
-            beam_size=beam_size,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 500},
-        )
-
-        duration = getattr(info, "duration", None)
-        if progress and duration:
-            progress(f"Audio duration: {duration / 60:0.1f} minutes. Progress appears as segments are decoded.")
-
-        # Materialize the generator so we can write all output formats.
-        segments = []
-        for segment in segments_iter:
-            segments.append(segment)
-            if progress:
-                percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
-                progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text.strip()[:80]}")
+            for raw in segments_iter:
+                # faster-whisper timestamps are relative to the trimmed input;
+                # shift them back to absolute time in the original recording.
+                segment = TranscriptSegment(
+                    start=resume_offset + float(raw.start),
+                    end=resume_offset + float(raw.end),
+                    text=str(raw.text).strip(),
+                )
+                new_segments.append(segment)
+                if writer:
+                    writer.append(segment)
+                if progress:
+                    percent = f" ({min(100.0, (segment.end / full_duration) * 100):0.1f}%)" if full_duration else ""
+                    progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text[:80]}")
+    finally:
+        if writer:
+            writer.close()
 
     if progress:
         progress("Writing transcript files...")
+
+    all_segments = prior_segments + new_segments
+    info_duration = getattr(info, "duration", None) if info is not None else None
+    out_duration = (resume_offset + info_duration) if info_duration is not None else (
+        all_segments[-1].end if all_segments else None
+    )
+    out_language = language or (getattr(info, "language", None) if info is not None else None) or "unknown"
 
     paths = write_outputs(
         audio_path=input_path,
         output_dir=output_dir,
         model_name=model_name,
-        language=language or getattr(info, "language", "unknown"),
-        duration=duration,
-        segments=segments,
+        language=out_language,
+        duration=out_duration,
+        segments=all_segments,
     )
+
+    if use_checkpoint:
+        # Transcript files are written, so the resume checkpoint is no longer needed.
+        checkpoint_path.unlink(missing_ok=True)
 
     if progress:
         progress(f"Done. Wrote files to {output_dir}")

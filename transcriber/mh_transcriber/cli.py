@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the ffmpeg WAV preparation step and pass the input directly to faster-whisper",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable checkpoint/resume; always transcribe the whole file from the start",
+    )
     return parser
 
 
@@ -56,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         beam_size=args.beam_size,
         progress=log,
         preprocess_audio=not args.no_preprocess_audio,
+        resume=not args.no_resume,
     )
     for kind, path in paths.items():
         print(f"{kind}: {path}")

@@ -84,7 +84,8 @@
 - [x] **Local Companion לתמלול Whisper בעברית** (XL) — **MVP מומש ב-`transcriber/`**
   - כלי מקומי נפרד שמקבל תיקיית MP4 שהורדה מהתוסף ומפיק TXT/SRT/VTT.
   - MVP: CLI + GUI עם `faster-whisper`, בחירת מודל, CUDA/CPU, ייצוא TXT/SRT/VTT/JSON.
-  - בהמשך: chunking+resume להקלטות ארוכות, diarization, חיבור אוטומטי ל-ZIP/recordings של התוסף, Native Messaging.
+  - ✅ resume להקלטות ארוכות מומש ב-v2.4.0 (checkpoint per-segment + ffmpeg seek).
+  - בהמשך: diarization, חיבור אוטומטי ל-ZIP/recordings של התוסף, Native Messaging, ניקוי/סיכום עם LLM.
   - להשאיר את התוסף אחראי על Moodle/Zoom/downloads, ואת הכלי המקומי אחראי על CPU/GPU/Whisper.
 
 ---
