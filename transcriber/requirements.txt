@@ -1,0 +1,4 @@
+faster-whisper>=1.1.0
+imageio-ffmpeg>=0.5.1
+# Optional, enables drag-and-drop in the GUI when installed.
+tkinterdnd2>=0.4.2
