@@ -23,6 +23,10 @@
 2. לעבור למודל `medium`.
 3. לעבור ל-`Device=cpu` ו-`Compute=int8` — איטי יותר אבל אמור לעבוד.
 
+## עדכון דרך update.bat
+
+אם `update.bat` נתקע על מחיקת `transcriber/.venv/.../ctranslate2.dll`, זה אומר ש-Python/GUI עדיין מחזיק את הקובץ פתוח. סגור את חלון התמלול וכל תהליך Python שרץ, לחץ `n` או סגור את חלון ה-CMD, ואז הרץ שוב את `update.bat`. המעדכן המעודכן שומר את `.venv` המקומי ולא מנסה למחוק אותו.
+
 ## התקנה והרצת GUI ב-Windows
 
 הדרך הכי פשוטה: להיכנס לתיקיית `transcriber` וללחוץ דאבל-קליק על:
@@ -50,7 +54,7 @@ python run_gui.py
 
 אם הלוג מראה `Loading model large-v3-turbo on cuda (float16)`, הכלי עדיין טוען/מוריד את המודל ומאתחל CUDA. בפעם הראשונה זה יכול לקחת כמה דקות בלי אחוזי התקדמות. אחרי שהמודל נטען תראה `Model loaded`.
 
-אחרי טעינת המודל אמור להופיע שלב `Preparing audio with ffmpeg before transcription` עם התקדמות `Prepared audio ... (%)`. זה שלב CPU/דיסק שממיר MP4/M4A/WAV לקובץ WAV פשוט של 16kHz כדי למנוע תקיעה שקטה בקריאת קובצי וידאו ארוכים. רק אחרי זה תראה שורות `Decoded ... (%)` לפי הזמן שכבר תומלל מתוך ההקלטה.
+בגרסה הנוכחית שלב `Preparing audio with ffmpeg before transcription` מופיע לפני טעינת המודל, עם התקדמות `Prepared audio ... (%)`. זה שלב CPU/דיסק שממיר MP4/M4A/WAV לקובץ WAV פשוט של 16kHz כדי למנוע תקיעה שקטה בקריאת קובצי וידאו ארוכים. אחריו מגיע שלב טעינת המודל, ואם הוא ארוך תראה הודעות `Still loading model ...` כל 30 שניות. רק אחרי `Model loaded` תראה שורות `Decoded ... (%)` לפי הזמן שכבר תומלל מתוך ההקלטה.
 
 חשוב: בתחילת הריצה יכול להיות שה-GPU כמעט לא מתאמץ כי הורדת המודל, טעינת הקובץ, המרת ffmpeg, VAD וחלק מההכנה רצים בעיקר על CPU/דיסק. כששורות `Decoded ...` מתחילות, אמורה להיות קפיצה ב-`Dedicated GPU memory`/VRAM, ולעיתים גם קפיצות קצרות ב-`GPU utilization`. אם VRAM עולה בכמה GB זה סימן חזק שהמודל יושב על הכרטיס גם אם האחוזים ב-Task Manager נראים נמוכים.
 
@@ -60,7 +64,7 @@ python run_gui.py
 python transcribe.py --diagnose-gpu
 ```
 
-ברירת המחדל מותאמת למחשב שלך: `Device=cuda`, `Compute=float16`, מודל `large-v3-turbo`, שפה `he`.
+ברירת המחדל מותאמת למחשב שלך: `Device=cuda`, `Compute=float16`, מודל `large-v3-turbo`, שפה `he`. אם זה עדיין לא מגיע ל-`Decoded`, לחץ `מצב בדיקה` כדי להריץ פעם אחת עם `model=base`; אם `base` עובד, הבעיה היא הורדה/טעינה של `large-v3-turbo` ולא כל הצינור.
 
 אם `tkinterdnd2` מותקן, אפשר לגרור קובץ לשדה. גם בלי drag-and-drop אפשר ללחוץ "בחר קובץ".
 

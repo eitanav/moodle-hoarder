@@ -98,6 +98,7 @@ class TranscriberApp:
         self.start_button = ttk.Button(action, text="התחל תמלול", command=self._start)
         self.start_button.pack(side="left")
         ttk.Button(action, text="בדוק GPU", command=self._diagnose_gpu).pack(side="left", padx=(8, 0))
+        ttk.Button(action, text="מצב בדיקה", command=self._quick_test_settings).pack(side="left", padx=(8, 0))
         ttk.Label(action, textvariable=self.status).pack(side="left", padx=12)
 
         self.progress_bar = ttk.Progressbar(frame, mode="indeterminate")
@@ -137,6 +138,13 @@ class TranscriberApp:
         for line in collect_cuda_diagnostics():
             self._append_log("  " + line)
 
+    def _quick_test_settings(self) -> None:
+        self.model.set("base")
+        self.device.set("cuda")
+        self.compute_type.set("float16")
+        self._append_log("Quick test settings applied: model=base, device=cuda, compute=float16.")
+        self._append_log("Use this first to verify the pipeline reaches Decoded lines, then switch back to large-v3-turbo.")
+
     def _start(self) -> None:
         if self._worker and self._worker.is_alive():
             return
@@ -144,7 +152,7 @@ class TranscriberApp:
             messagebox.showerror("חסר קובץ", "בחר או גרור קובץ הקלטה קודם.")
             return
         self.start_button.configure(state="disabled")
-        self.status.set("טוען מודל / מתחיל תמלול...")
+        self.status.set("מכין אודיו / טוען מודל / מתחיל תמלול...")
         self.log.delete("1.0", "end")
         self._append_log("Started. If this is the first run, model download/loading can take a few minutes.")
         self.progress_bar.start(12)

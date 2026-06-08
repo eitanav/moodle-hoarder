@@ -7,6 +7,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import sys
+import threading
+import time
 from typing import Literal
 
 from .audio import prepare_audio_for_transcription
@@ -35,6 +37,48 @@ def _resolve_compute_type(device: Device, compute_type: ComputeType) -> str:
     return "float16"
 
 
+
+def _load_whisper_model_with_heartbeat(
+    *,
+    model_cls: object,
+    model_name: str,
+    device: str,
+    compute_type: str,
+    progress: ProgressCallback | None,
+) -> object:
+    """Load a Whisper model while emitting periodic progress messages.
+
+    The faster-whisper constructor can block for a long time during first-run
+    Hugging Face downloads or CTranslate2 initialization, so this keeps the GUI
+    log alive and gives the user actionable next steps instead of appearing stuck.
+    """
+
+    stop = threading.Event()
+    started_at = time.monotonic()
+
+    def heartbeat() -> None:
+        while not stop.wait(30):
+            elapsed_minutes = (time.monotonic() - started_at) / 60
+            if progress:
+                progress(
+                    f"Still loading model {model_name} ({elapsed_minutes:0.1f} min elapsed). "
+                    "First run may be downloading; if this passes 10-15 min, try model=base/small once."
+                )
+
+    thread: threading.Thread | None = None
+    if progress:
+        thread = threading.Thread(target=heartbeat, daemon=True)
+        thread.start()
+    try:
+        return model_cls(model_name, device=device, compute_type=compute_type)
+    finally:
+        stop.set()
+        if thread:
+            thread.join(timeout=0.2)
+        if progress:
+            elapsed = time.monotonic() - started_at
+            progress(f"Model load step finished after {elapsed:0.1f}s.")
+
 def transcribe_file(
     *,
     input_path: Path,
@@ -61,30 +105,6 @@ def transcribe_file(
     output_dir = Path(output_dir or input_path.parent / "transcripts").expanduser().resolve()
     resolved_compute = _resolve_compute_type(device, compute_type)
 
-    if progress:
-        progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
-        progress("First run can take several minutes because the model may be downloading and initializing.")
-    if device in {"cuda", "auto"}:
-        log_cuda_diagnostics(progress)
-
-    if importlib.util.find_spec("faster_whisper") is None:
-        requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
-        raise RuntimeError(
-            "Missing dependency faster-whisper. "
-            "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
-            f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
-        )
-
-    from faster_whisper import WhisperModel
-
-    model = WhisperModel(model_name, device=device, compute_type=resolved_compute)
-
-    if device in {"cuda", "auto"}:
-        log_cuda_diagnostics(progress)
-
-    if progress:
-        progress("Model loaded. Preparing audio and starting transcription...")
-
     with tempfile.TemporaryDirectory(prefix="mh-transcriber-") as tmp:
         transcription_input = input_path
         if preprocess_audio:
@@ -97,6 +117,34 @@ def transcribe_file(
             progress("Audio preprocessing is disabled; passing media directly to faster-whisper.")
 
         if progress:
+            progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
+            progress("First run can take several minutes because the model may be downloading and initializing.")
+        if device in {"cuda", "auto"}:
+            log_cuda_diagnostics(progress)
+
+        if importlib.util.find_spec("faster_whisper") is None:
+            requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
+            raise RuntimeError(
+                "Missing dependency faster-whisper. "
+                "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
+                f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
+            )
+
+        from faster_whisper import WhisperModel
+
+        model = _load_whisper_model_with_heartbeat(
+            model_cls=WhisperModel,
+            model_name=model_name,
+            device=device,
+            compute_type=resolved_compute,
+            progress=progress,
+        )
+
+        if device in {"cuda", "auto"}:
+            log_cuda_diagnostics(progress)
+
+        if progress:
+            progress("Model loaded. Starting transcription...")
             progress(f"Transcribing {input_path.name}...")
 
         segments_iter, info = model.transcribe(
