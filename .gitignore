@@ -27,3 +27,5 @@ package-lock.json
 # Local secrets
 .env
 .env.local
+__pycache__/
+*.py[cod]
