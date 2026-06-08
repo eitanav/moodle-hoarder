@@ -27,3 +27,9 @@ package-lock.json
 # Local secrets
 .env
 .env.local
+__pycache__/
+*.py[cod]
+# Python virtual environments
+.venv/
+venv/
+transcriber/.venv/
