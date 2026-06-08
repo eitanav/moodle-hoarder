@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Moodle Hoarder",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Hoards every file, folder, assignment, syllabus and recording link from Ariel Moodle courses into tidy ZIPs. Plus Zoom cloud recording links.",
   "permissions": ["activeTab", "downloads", "scripting", "notifications", "storage", "unlimitedStorage", "contextMenus", "debugger", "offscreen", "declarativeNetRequest"],
   "host_permissions": [

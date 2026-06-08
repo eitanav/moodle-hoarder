@@ -48,9 +48,11 @@ python run_gui.py
 
 ### איך יודעים שזה מתקדם?
 
-אם הלוג מראה `Loading model large-v3-turbo on cuda (float16)`, הכלי עדיין טוען/מוריד את המודל ומאתחל CUDA. בפעם הראשונה זה יכול לקחת כמה דקות בלי אחוזי התקדמות. אחרי שהמודל נטען תראה `Model loaded`, ואז שורות `Decoded ... (%)` לפי הזמן שכבר תומלל מתוך ההקלטה.
+אם הלוג מראה `Loading model large-v3-turbo on cuda (float16)`, הכלי עדיין טוען/מוריד את המודל ומאתחל CUDA. בפעם הראשונה זה יכול לקחת כמה דקות בלי אחוזי התקדמות. אחרי שהמודל נטען תראה `Model loaded`.
 
-חשוב: בתחילת הריצה יכול להיות שה-GPU כמעט לא מתאמץ כי הורדת המודל, טעינת הקובץ, VAD וחלק מההכנה רצים בעיקר על CPU/דיסק. כששורות `Decoded ...` מתחילות, אמורה להיות קפיצה ב-`Dedicated GPU memory`/VRAM, ולעיתים גם קפיצות קצרות ב-`GPU utilization`. אם VRAM עולה בכמה GB זה סימן חזק שהמודל יושב על הכרטיס גם אם האחוזים ב-Task Manager נראים נמוכים.
+אחרי טעינת המודל אמור להופיע שלב `Preparing audio with ffmpeg before transcription` עם התקדמות `Prepared audio ... (%)`. זה שלב CPU/דיסק שממיר MP4/M4A/WAV לקובץ WAV פשוט של 16kHz כדי למנוע תקיעה שקטה בקריאת קובצי וידאו ארוכים. רק אחרי זה תראה שורות `Decoded ... (%)` לפי הזמן שכבר תומלל מתוך ההקלטה.
+
+חשוב: בתחילת הריצה יכול להיות שה-GPU כמעט לא מתאמץ כי הורדת המודל, טעינת הקובץ, המרת ffmpeg, VAD וחלק מההכנה רצים בעיקר על CPU/דיסק. כששורות `Decoded ...` מתחילות, אמורה להיות קפיצה ב-`Dedicated GPU memory`/VRAM, ולעיתים גם קפיצות קצרות ב-`GPU utilization`. אם VRAM עולה בכמה GB זה סימן חזק שהמודל יושב על הכרטיס גם אם האחוזים ב-Task Manager נראים נמוכים.
 
 כדי לבדוק ישירות מתוך התוכנה, לחץ על הכפתור `בדוק GPU` או הרץ CLI:
 
@@ -69,6 +71,8 @@ cd transcriber
 .\.venv\Scripts\Activate.ps1
 python transcribe.py "C:\path\to\lecture.mp4" --device cuda --compute-type float16 --model large-v3-turbo --language he
 ```
+
+ברירת המחדל מכינה קודם WAV זמני עם ffmpeg. אם אתה רוצה לחזור להתנהגות הישנה ולשלוח את הקובץ ישירות ל-`faster-whisper`, הוסף `--no-preprocess-audio`.
 
 אפשר לבחור תיקיית פלט:
 

@@ -4,6 +4,16 @@
 
 ---
 
+## v2.3.0 — ffmpeg Audio Preprocessing (anti-stall ל-MP4 ארוכים)
+
+- **`audio.py`** — המרת MP4/M4A ל-WAV מונו 16kHz לפני Whisper, עם progress כל 10 שניות
+- **אנטי-stall** — MP4 ארוכים לא "נתקעים" בשקט לפני הסגמנט הראשון
+- **`imageio-ffmpeg`** כ-fallback — אם ffmpeg לא במערכת, נמשך מ-package
+- **`preprocess_audio=True`** כ-flag ב-`transcribe_file` — ניתן לבטל
+- **בדיקות `test_audio.py`** — parsing של duration ו-progress time מ-stderr של ffmpeg
+
+---
+
 ## v2.2.0 — GPU Diagnostics ב-Transcriber
 
 - **`diagnostics.py`** — בדיקת CUDA/nvidia-smi: VRAM פנוי, utilization, compute types של CTranslate2
