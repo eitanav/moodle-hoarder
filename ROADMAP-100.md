@@ -56,6 +56,19 @@
 
 ### V2.1 — אחרי שחרור יציב
 
+- [ ] **תאימות MP4 לנגן המובנה של Windows** (M)
+  - **הבעיה:** Windows Media Player / Movies & TV מציגים `unsupported encoding settings` על חלק מהקלטות Zoom. VLC ונגנים צד-שלישי מנגנים אותן בסדר.
+  - **שורש הבעיה הסביר ביותר (לבדוק על קובץ אמיתי):**
+    1. **moov atom בסוף הקובץ** — הקלטות streaming נשמרות עם ה-moov (מטא-דאטה) בסוף במקום בהתחלה. Windows Media Player דורש faststart (moov בהתחלה); VLC קורא מכל מקום.
+    2. **H.264 High Profile Level ≥ 4.2** — decoder המובנה של Windows (MFT) לא תמיד תומך ב-High@4.2+, גם ל-VLC יש decoder משלו.
+    3. **פיקסל פורמט לא סטנדרטי** — 10-bit color / 4:2:2 שWindows לא תומך בהם בדיפולט.
+  - **גישת תיקון — לפי חומרה:**
+    - **קל (ללא re-encode):** `mp4box.js` (~500KB) — רושם מחדש את הcontainer עם faststart ו-`-inter 500` (interleaving). פותר את בעיית moov ללא פגיעה באיכות ובמהירות גבוהה.
+    - **בינוני:** שינוי metadata של profile/level ב-SPS header ידנית (ללא re-encode) — נדיר שצריך.
+    - **כבד (re-encode):** `ffmpeg.wasm` (~30MB) עם `-vcodec libx264 -profile:v main -level 4.0 -acodec aac` — מבטיח תאימות מלאה אך אטי מאוד ו-WASM כבד.
+  - **המלצה:** להתחיל עם mp4box.js faststart. אם פותר את הבעיה — סיימנו. אם לא — לבדוק את ה-SPS header של קובץ אמיתי ולהחליט אם צריך re-encode.
+  - **גודל:** M. **תלוי ב:** בדיקה של קובץ MP4 אמיתי מ-Zoom כדי לאבחן את הגורם המדויק.
+
 - [ ] **אופטימיזציה וריפקטור עמוק** (XL)
   - לפרק את `popup.js` למודולים: course download, Zoom scan, Zoom video downloader, transcripts, history, UI helpers.
   - לנקות comments ישנים שסותרים את המימוש הנוכחי.
