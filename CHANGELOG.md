@@ -4,6 +4,14 @@
 
 ---
 
+## v2.3.1 — Heartbeat בטעינת מודל + הגנת .venv ב-update.bat
+
+- **Heartbeat בטעינת מודל** — כל 30 שניות בזמן טעינה ראשונה מדפיס "Still loading model X (Y min elapsed)..." — הגיוי לא נראה תקוע
+- **`update.bat` fix** — `git clean` לא מוחק `.venv/` — המשתמש לא מאבד את הסביבה הוירטואלית בעדכון
+- **`.gitignore`** — נוסף `.venv/`, `venv/`, `transcriber/.venv/`
+
+---
+
 ## v2.3.0 — ffmpeg Audio Preprocessing (anti-stall ל-MP4 ארוכים)
 
 - **`audio.py`** — המרת MP4/M4A ל-WAV מונו 16kHz לפני Whisper, עם progress כל 10 שניות

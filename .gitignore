@@ -29,3 +29,7 @@ package-lock.json
 .env.local
 __pycache__/
 *.py[cod]
+# Python virtual environments
+.venv/
+venv/
+transcriber/.venv/
