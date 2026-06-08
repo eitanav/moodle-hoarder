@@ -4,6 +4,18 @@
 
 ---
 
+## v2.2.0 — GPU Diagnostics ב-Transcriber
+
+- **`diagnostics.py`** — בדיקת CUDA/nvidia-smi: VRAM פנוי, utilization, compute types של CTranslate2
+- **כפתור "בדוק GPU"** ב-GUI — מציג diagnostics ישירות בלוג בלחיצה אחת
+- **`--diagnose-gpu`** ב-CLI — הדפסת diagnostics ויציאה (ללא קובץ קלט)
+- **Progress bar** (indeterminate) ב-GUI בזמן הורדת מודל + תמלול
+- **תגי זמן** (`[HH:MM:SS]`) בכל שורה בלוג ב-GUI
+- **אחוז התקדמות** בזמן תמלול — `Decoded 10.5s–12.3s (5.2%): ...`
+- **GPU diagnostics אוטומטיים** ב-engine לפני ואחרי טעינת המודל
+
+---
+
 ## v2.1.1 — חוקי פיתוח
 
 - הוספת `CLAUDE.md` עם חוקי גרסאות קבועים: כל push = העלאת גרסה + CHANGELOG + badge

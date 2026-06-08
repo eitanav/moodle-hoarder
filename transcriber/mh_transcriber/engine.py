@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import importlib.util
 from pathlib import Path
+import sys
 from typing import Literal
 
+from .diagnostics import log_cuda_diagnostics
 from .formatters import write_outputs
 
 ComputeType = Literal["auto", "float16", "int8_float16", "int8", "float32"]
@@ -56,17 +59,27 @@ def transcribe_file(
 
     if progress:
         progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
+        progress("First run can take several minutes because the model may be downloading and initializing.")
+    if device in {"cuda", "auto"}:
+        log_cuda_diagnostics(progress)
 
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:  # pragma: no cover - exercised by real install flow
+    if importlib.util.find_spec("faster_whisper") is None:
+        requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
         raise RuntimeError(
-            "Missing dependency faster-whisper. Run: python -m pip install -r transcriber/requirements.txt"
-        ) from exc
+            "Missing dependency faster-whisper. "
+            "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
+            f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
+        )
+
+    from faster_whisper import WhisperModel
 
     model = WhisperModel(model_name, device=device, compute_type=resolved_compute)
 
+    if device in {"cuda", "auto"}:
+        log_cuda_diagnostics(progress)
+
     if progress:
+        progress("Model loaded. Preparing audio and starting transcription...")
         progress(f"Transcribing {input_path.name}...")
 
     segments_iter, info = model.transcribe(
@@ -77,12 +90,17 @@ def transcribe_file(
         vad_parameters={"min_silence_duration_ms": 500},
     )
 
+    duration = getattr(info, "duration", None)
+    if progress and duration:
+        progress(f"Audio duration: {duration / 60:0.1f} minutes. Progress appears as segments are decoded.")
+
     # Materialize the generator so we can write all output formats.
     segments = []
     for segment in segments_iter:
         segments.append(segment)
         if progress:
-            progress(f"{segment.start:0.1f}s–{segment.end:0.1f}s {segment.text.strip()[:80]}")
+            percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
+            progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text.strip()[:80]}")
 
     if progress:
         progress("Writing transcript files...")
@@ -92,7 +110,7 @@ def transcribe_file(
         output_dir=output_dir,
         model_name=model_name,
         language=language or getattr(info, "language", "unknown"),
-        duration=getattr(info, "duration", None),
+        duration=duration,
         segments=segments,
     )
 

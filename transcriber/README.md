@@ -23,9 +23,17 @@
 2. לעבור למודל `medium`.
 3. לעבור ל-`Device=cpu` ו-`Compute=int8` — איטי יותר אבל אמור לעבוד.
 
-## התקנה ב-Windows
+## התקנה והרצת GUI ב-Windows
 
-פתח PowerShell בתוך תיקיית הרפו:
+הדרך הכי פשוטה: להיכנס לתיקיית `transcriber` וללחוץ דאבל-קליק על:
+
+```text
+run_gui_windows.bat
+```
+
+הקובץ הזה יוצר `.venv` אם צריך, מתקין `faster-whisper` אם הוא חסר, ואז פותח את ה-GUI. אם אתה מקבל שגיאה על dependency חסר, זה כמעט תמיד אומר שהרצת `python run_gui.py` מסביבת Python אחרת במקום דרך `run_gui_windows.bat`.
+
+התקנה ידנית, אם אתה מעדיף PowerShell:
 
 ```powershell
 cd transcriber
@@ -33,16 +41,21 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python run_gui.py
 ```
 
 > בפעם הראשונה המודל יורד מהאינטרנט. אחרי זה הוא נשמר ב-cache של Hugging Face/CTranslate2.
 
-## הרצת GUI
+### איך יודעים שזה מתקדם?
+
+אם הלוג מראה `Loading model large-v3-turbo on cuda (float16)`, הכלי עדיין טוען/מוריד את המודל ומאתחל CUDA. בפעם הראשונה זה יכול לקחת כמה דקות בלי אחוזי התקדמות. אחרי שהמודל נטען תראה `Model loaded`, ואז שורות `Decoded ... (%)` לפי הזמן שכבר תומלל מתוך ההקלטה.
+
+חשוב: בתחילת הריצה יכול להיות שה-GPU כמעט לא מתאמץ כי הורדת המודל, טעינת הקובץ, VAD וחלק מההכנה רצים בעיקר על CPU/דיסק. כששורות `Decoded ...` מתחילות, אמורה להיות קפיצה ב-`Dedicated GPU memory`/VRAM, ולעיתים גם קפיצות קצרות ב-`GPU utilization`. אם VRAM עולה בכמה GB זה סימן חזק שהמודל יושב על הכרטיס גם אם האחוזים ב-Task Manager נראים נמוכים.
+
+כדי לבדוק ישירות מתוך התוכנה, לחץ על הכפתור `בדוק GPU` או הרץ CLI:
 
 ```powershell
-cd transcriber
-.\.venv\Scripts\Activate.ps1
-python run_gui.py
+python transcribe.py --diagnose-gpu
 ```
 
 ברירת המחדל מותאמת למחשב שלך: `Device=cuda`, `Compute=float16`, מודל `large-v3-turbo`, שפה `he`.
