@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import queue
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .diagnostics import collect_cuda_diagnostics
 from .engine import DEFAULT_MODEL, RECOMMENDED_MODELS, transcribe_file
 
 try:
@@ -95,7 +97,11 @@ class TranscriberApp:
         action.pack(fill="x", pady=(0, 12))
         self.start_button = ttk.Button(action, text="התחל תמלול", command=self._start)
         self.start_button.pack(side="left")
+        ttk.Button(action, text="בדוק GPU", command=self._diagnose_gpu).pack(side="left", padx=(8, 0))
         ttk.Label(action, textvariable=self.status).pack(side="left", padx=12)
+
+        self.progress_bar = ttk.Progressbar(frame, mode="indeterminate")
+        self.progress_bar.pack(fill="x", pady=(0, 12))
 
         log_frame = ttk.LabelFrame(frame, text="לוג")
         log_frame.pack(fill="both", expand=True)
@@ -126,6 +132,11 @@ class TranscriberApp:
             if not self.output_dir.get():
                 self.output_dir.set(str(Path(data).parent / "transcripts"))
 
+    def _diagnose_gpu(self) -> None:
+        self._append_log("CUDA/GPU diagnostics:")
+        for line in collect_cuda_diagnostics():
+            self._append_log("  " + line)
+
     def _start(self) -> None:
         if self._worker and self._worker.is_alive():
             return
@@ -133,8 +144,10 @@ class TranscriberApp:
             messagebox.showerror("חסר קובץ", "בחר או גרור קובץ הקלטה קודם.")
             return
         self.start_button.configure(state="disabled")
-        self.status.set("מתמלל...")
+        self.status.set("טוען מודל / מתחיל תמלול...")
         self.log.delete("1.0", "end")
+        self._append_log("Started. If this is the first run, model download/loading can take a few minutes.")
+        self.progress_bar.start(12)
         self._worker = threading.Thread(target=self._run_transcription, daemon=True)
         self._worker.start()
 
@@ -160,19 +173,26 @@ class TranscriberApp:
             except queue.Empty:
                 break
             if message.startswith("DONE:"):
+                self.progress_bar.stop()
                 self.start_button.configure(state="normal")
                 self.status.set("הסתיים")
-                self.log.insert("end", "\n" + message[5:] + "\n")
+                self._append_log("Done. Output files:\n" + message[5:])
                 messagebox.showinfo("התמלול הסתיים", message[5:])
             elif message.startswith("ERROR:"):
+                self.progress_bar.stop()
                 self.start_button.configure(state="normal")
                 self.status.set("נכשל")
-                self.log.insert("end", "\nשגיאה: " + message[6:] + "\n")
+                self._append_log("שגיאה: " + message[6:])
                 messagebox.showerror("שגיאה", message[6:])
             else:
-                self.log.insert("end", message + "\n")
-                self.log.see("end")
+                self.status.set(message[:110])
+                self._append_log(message)
         self.root.after(150, self._drain_messages)
+
+    def _append_log(self, message: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log.insert("end", f"[{timestamp}] {message}\n")
+        self.log.see("end")
 
     def run(self) -> None:
         self.root.mainloop()
