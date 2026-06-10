@@ -29,6 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the ffmpeg WAV preparation step and pass the input directly to faster-whisper",
     )
+    parser.add_argument(
+        "--chunk-minutes",
+        type=float,
+        default=30.0,
+        help="For long recordings, transcribe in windows of this many minutes with resume. 0 disables chunking",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="With chunking, ignore any saved checkpoint and re-transcribe every chunk",
+    )
     return parser
 
 
@@ -56,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
         beam_size=args.beam_size,
         progress=log,
         preprocess_audio=not args.no_preprocess_audio,
+        chunk_length_s=args.chunk_minutes * 60 if args.chunk_minutes and args.chunk_minutes > 0 else None,
+        resume=not args.no_resume,
     )
     for kind, path in paths.items():
         print(f"{kind}: {path}")

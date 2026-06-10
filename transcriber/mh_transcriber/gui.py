@@ -33,6 +33,7 @@ class TranscriberApp:
         self.device = tk.StringVar(value="cuda")
         self.compute_type = tk.StringVar(value="float16")
         self.language = tk.StringVar(value="he")
+        self.chunk_minutes = tk.StringVar(value="30")
         self.status = tk.StringVar(value="בחר קובץ הקלטה או גרור אותו לחלון")
         self._messages: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
@@ -84,6 +85,13 @@ class TranscriberApp:
             values=["float16", "int8_float16", "int8", "auto", "float32"],
             state="readonly",
         ).grid(row=1, column=3, sticky="ew", padx=8, pady=(8, 0))
+
+        ttk.Label(grid, text="מקטע (דק')").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(grid, textvariable=self.chunk_minutes, width=8).grid(row=2, column=1, sticky="w", padx=8, pady=(8, 0))
+        ttk.Label(
+            grid,
+            text="הקלטות ארוכות מחולקות למקטעים עם המשך אוטומטי. 0 = ללא חלוקה.",
+        ).grid(row=2, column=2, columnspan=2, sticky="w", pady=(8, 0))
         grid.columnconfigure(1, weight=1)
 
         out = ttk.LabelFrame(frame, text="תיקיית פלט")
@@ -168,11 +176,20 @@ class TranscriberApp:
                 language=self.language.get(),
                 device=self.device.get(),
                 compute_type=self.compute_type.get(),
+                chunk_length_s=self._chunk_length_seconds(),
                 progress=self._messages.put,
             )
             self._messages.put("DONE:" + "\n".join(f"{key}: {value}" for key, value in paths.items()))
         except Exception as exc:  # noqa: BLE001 - surface GUI errors to the user
             self._messages.put("ERROR:" + str(exc))
+
+    def _chunk_length_seconds(self) -> float | None:
+        raw = self.chunk_minutes.get().strip().replace(",", ".")
+        try:
+            minutes = float(raw)
+        except ValueError:
+            return None
+        return minutes * 60 if minutes > 0 else None
 
     def _drain_messages(self) -> None:
         while True:
