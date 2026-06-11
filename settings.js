@@ -79,6 +79,15 @@ const SETTINGS_DEFAULTS = {
   // it's small, useful, and doesn't leak anything the ZIP doesn't already.
   includeJson: true,
 
+  // Auto-rename generic PDFs by their internal title (ROADMAP #21).
+  // When true, a PDF whose Moodle filename is generic ("1.pdf", "scan.pdf",
+  // "document.pdf", a bare date, …) is renamed to its embedded /Title
+  // metadata if that title is meaningful. Best-effort, no AI, no network:
+  // we read the /Info Title straight from the PDF bytes. PDFs that hide
+  // their metadata in compressed object streams simply keep their original
+  // name. Default off — renaming files is a surprise some users won't want.
+  renamePdfByTitle: false,
+
   // Extract Zoom auto-transcripts (WebVTT) for each selected recording.
   // When true, after the share URL extraction the extension opens each
   // recording in a hidden background tab, intercepts the VTT XHR, and

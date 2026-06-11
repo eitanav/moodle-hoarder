@@ -2596,6 +2596,13 @@ async function runDownload({ courseName, courseId, courseUrl, items, silent }) {
       else if (r.kind === 'link') links.push(r);
       else if (r.kind === 'event') events.push(r.event);
       else {
+        // ROADMAP #21: rename generic-named PDFs to their embedded title.
+        // Done once here (before the layout split) so the section and flat
+        // copies share the new name and dedup consistently.
+        if (CACHED_SETTINGS?.renamePdfByTitle && r.blob) {
+          await maybeRenamePdfByTitle(r);
+          if (!silent && r.renamedFrom) logLine(t('log.pdf.renamed', { from: r.renamedFrom, to: r.path.split('/').pop() }), 'ok');
+        }
         // Each downloaded file can go into two places in the ZIP, controlled by settings.zipLayout:
         //   'sections' = only the numbered section folder
         //   'flat'     = only the single "00 - כל הקבצים" folder
@@ -3700,6 +3707,140 @@ function formatSize(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   return (n / 1024 / 1024).toFixed(1) + ' MB';
 }
+// ========== PDF title auto-rename (ROADMAP #21) ==========
+// Best-effort: read a PDF's /Info /Title straight from its bytes and use it as
+// the filename when the Moodle-supplied name carries no information. No pdf.js,
+// no AI, no network. PDFs that bury their metadata in compressed object streams
+// simply keep their original name (the byte scan won't find a plaintext /Title).
+
+// Filenames that say nothing about the content — worth replacing with a title.
+const GENERIC_PDF_NAME = /^(?:\d+|\d+[-_. ]+\d+(?:[-_. ]+\d+)?|page[-_ ]?\d+|p\d+|scan(?:ned)?[-_ ]?\d*|img[-_ ]?\d+|image[-_ ]?\d+|doc(?:ument)?[-_ ]?\d*|unnamed|untitled|noname|file[-_ ]?\d*|download[-_ ]?\d*|new[-_ ]?\d*|copy(?: ?\(\d+\))?|attachment[-_ ]?\d*|temp[-_ ]?\d*|output[-_ ]?\d*|final|draft|\d{4}[-_.]\d{1,2}[-_.]\d{1,2})$/i;
+
+function isGenericPdfName(basenameNoExt) {
+  const s = (basenameNoExt || '').trim();
+  if (!s) return true;
+  if (s.length <= 2) return true;            // "a", "1b" — no signal
+  return GENERIC_PDF_NAME.test(s);
+}
+
+// Decode a PDF string token's raw bytes. PDF text strings use one of two
+// encodings: UTF-16BE (signalled by a leading FE FF BOM — this is how Hebrew
+// and other non-Latin titles are stored) or PDFDocEncoding (close enough to
+// Latin-1 for the ASCII/Latin titles that use it).
+function decodePdfStringBytes(bytes) {
+  if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder('utf-8').decode(bytes.subarray(3)); // non-standard but seen
+  }
+  return new TextDecoder('latin1').decode(bytes);
+}
+
+// Parse a PDF literal string "(...)" with u[i] === '(' (0x28). Returns the
+// decoded content bytes (escapes resolved, nested parens balanced).
+function parsePdfLiteralString(u, i) {
+  const out = [];
+  let depth = 0;
+  let j = i + 1;
+  for (; j < u.length; j++) {
+    const c = u[j];
+    if (c === 0x5C) { // backslash escape
+      const n = u[j + 1];
+      switch (n) {
+        case 0x6E: out.push(0x0A); j++; break;            // \n
+        case 0x72: out.push(0x0D); j++; break;            // \r
+        case 0x74: out.push(0x09); j++; break;            // \t
+        case 0x62: out.push(0x08); j++; break;            // \b
+        case 0x66: out.push(0x0C); j++; break;            // \f
+        case 0x28: out.push(0x28); j++; break;            // \(
+        case 0x29: out.push(0x29); j++; break;            // \)
+        case 0x5C: out.push(0x5C); j++; break;            // \\
+        case 0x0A: j++; break;                            // line continuation
+        case 0x0D: j++; if (u[j + 1] === 0x0A) j++; break;
+        default:
+          if (n >= 0x30 && n <= 0x37) {                   // octal \ddd
+            let oct = '', k = j + 1;
+            while (k < u.length && k <= j + 3 && u[k] >= 0x30 && u[k] <= 0x37) { oct += String.fromCharCode(u[k]); k++; }
+            out.push(parseInt(oct, 8) & 0xFF);
+            j = k - 1;
+          } else { out.push(n); j++; }                    // unknown escape → literal char
+      }
+    } else if (c === 0x28) { depth++; out.push(c); }
+    else if (c === 0x29) {
+      if (depth === 0) break;
+      depth--; out.push(c);
+    } else out.push(c);
+  }
+  return Uint8Array.from(out);
+}
+
+// Parse a PDF hex string "<...>" with u[i] === '<' (0x3C).
+function parsePdfHexString(u, i) {
+  let hex = '';
+  for (let j = i + 1; j < u.length; j++) {
+    const c = u[j];
+    if (c === 0x3E) break;                                // '>'
+    if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66)) hex += String.fromCharCode(c);
+    // whitespace inside hex strings is allowed and ignored
+  }
+  if (hex.length % 2) hex += '0';
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let k = 0; k < bytes.length; k++) bytes[k] = parseInt(hex.substr(k * 2, 2), 16);
+  return bytes;
+}
+
+// Find the first usable /Title value in a PDF's bytes. We search a Latin-1
+// view of the buffer (native indexOf — fast) to locate "/Title", then parse
+// the string token that follows from the real bytes so multi-byte encodings
+// survive. Returns a trimmed string, or '' if none found.
+function extractPdfTitle(u) {
+  const latin = new TextDecoder('latin1').decode(u);
+  let from = 0;
+  for (let guard = 0; guard < 64; guard++) {              // cap: don't scan forever
+    const idx = latin.indexOf('/Title', from);
+    if (idx < 0) break;
+    from = idx + 6;
+    let j = idx + 6;
+    while (j < u.length && (u[j] === 0x20 || u[j] === 0x0A || u[j] === 0x0D || u[j] === 0x09 || u[j] === 0x0C)) j++;
+    let bytes = null;
+    if (u[j] === 0x28) bytes = parsePdfLiteralString(u, j);
+    else if (u[j] === 0x3C && u[j + 1] !== 0x3C) bytes = parsePdfHexString(u, j); // '<' but not '<<' (dict)
+    if (!bytes) continue;
+    const s = decodePdfStringBytes(bytes).replace(/ /g, '').replace(/\s+/g, ' ').trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+// Given a fetched file entry { path, blob } whose basename is a generic PDF,
+// try to rename it to the PDF's embedded title. Mutates and returns the entry.
+async function maybeRenamePdfByTitle(entry) {
+  try {
+    const path = entry.path || '';
+    const slash = path.lastIndexOf('/');
+    const dir = slash >= 0 ? path.slice(0, slash + 1) : '';
+    const base = slash >= 0 ? path.slice(slash + 1) : path;
+    if (!/\.pdf$/i.test(base)) return entry;
+    const nameNoExt = base.replace(/\.pdf$/i, '');
+    if (!isGenericPdfName(nameNoExt)) return entry;
+    const blob = entry.blob;
+    if (!blob || blob.size > 40 * 1024 * 1024) return entry; // skip scanning huge files
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    // Confirm it's really a PDF (magic "%PDF") before trusting a /Title.
+    if (!(buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46)) return entry;
+    const title = extractPdfTitle(buf);
+    if (!title || title.length < 3 || title.length > 150) return entry;
+    if (isGenericPdfName(title.replace(/\.pdf$/i, ''))) return entry;
+    const clean = sanitizeFilename(title);
+    if (!clean || clean.length < 3) return entry;
+    if (clean.toLowerCase() === nameNoExt.toLowerCase()) return entry;
+    entry.renamedFrom = base;
+    entry.path = `${dir}${clean}.pdf`;
+  } catch {}
+  return entry;
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
