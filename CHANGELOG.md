@@ -4,6 +4,21 @@
 
 ---
 
+## v2.4.0 — תמלול Zoom רץ ב-Background + תיקון PyAV ב-Transcriber
+
+**הבעיה:** חילוץ תמלולי Zoom (VTT) רץ עד עכשיו בתוך הפופאפ עצמו — אם המשתמש סגר את הפופאפ (אפילו בטעות, או כי לחץ במקום אחר), כל התהליך נעצר באמצע ואיבד את כל ההתקדמות. בנוסף, ב-Transcriber היתה תקלה שגרמה לקריסה עם `module 'av' has no attribute 'audio'` בהפעלות מסוימות.
+
+- **חילוץ תמלולים עבר ל-`background.js`** — כל הלוגיקה (`extractOneTranscript`/`extractZoomTranscripts` לשעבר) רצה כעת ב-service worker עם פונקציות `_mhTr*` חדשות, ממש כמו שהורדות וידאו של Zoom כבר רצות שם. סגירת הפופאפ לא מפסיקה יותר תמלול שכבר התחיל
+- **סטטוס חדש `mhTrStatus`** ב-`chrome.storage.local` — מאפשר לפופאפ להציג את ההתקדמות גם אם נפתח מחדש באמצע ריצה (בדיוק כמו `mhDlStatus` הקיים להורדות וידאו)
+- **הודעות חדשות בין הפופאפ ל-background**: `mh-extract-transcripts` (התחלה), `mh-tr-status-query` (סטטוס), `mh-cancel-transcripts` (ביטול) — אותו דגם כמו ניהול הורדות הוידאו
+- **המקביליות בדיפולט עברה מ-3 ל-1** — כל תמלול פותח טאב נסתר עם נגן Zoom; ריצה אחת בכל פעם יותר אמינה. ניתן להגדיל ב-Options (`transcriptConcurrency`)
+- **ניקוי קוד מת ב-`popup.js`** — הוסרו `extractZoomTranscripts`, `extractOneTranscript`, `buildZoomRecordingsText`, `zoomZipFilename`, `vttToCleanText` הישנים (כל הלוגיקה כפולה כעת ב-background.js); נשאר רק הקריאה להודעה ל-background ורינדור הסטטוס
+- **תיקון PyAV ב-Transcriber (`engine.py`)** — `_prime_pyav_audio_namespace()` מייבא במפורש את `av.audio`/`av.audio.resampler`/`av.audio.frame` לפני התמלול, עם שגיאה ברורה והנחיות תיקון אם זה עדיין נכשל. מחליף hack ישן ב-`run_gui.py` שעשה את זה בצורה פחות אמינה
+- **כפתור "שמור דוח דיבאג" ב-GUI** — שומר JSON עם הגדרות, 1000 שורות לוג אחרונות, ומידע על השגיאה (אם הייתה) — לדיווח באגים מהיר יותר
+- **`run_gui_windows.bat`** — בדיקת התלויות כוללת כעת גם `av.audio.resampler`/`av.audio.frame`
+
+---
+
 ## v2.3.2 — Debug Report ב-Transcriber
 
 - **`debug_report.py`** — מפיק JSON אבחון שלם: פלטפורמה, Python, גרסאות חבילות (faster-whisper, ctranslate2, av, numpy, onnxruntime, huggingface-hub, tokenizers, imageio-ffmpeg, tkinterdnd2), בדיקת modules, ffmpeg path, media probe, CUDA diagnostics, הגדרות, שגיאות + traceback

@@ -9,6 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .debug_report import write_debug_report
 from .diagnostics import collect_cuda_diagnostics
 from .engine import DEFAULT_MODEL, RECOMMENDED_MODELS, transcribe_file
 
@@ -36,6 +37,7 @@ class TranscriberApp:
         self.status = tk.StringVar(value="בחר קובץ הקלטה או גרור אותו לחלון")
         self._messages: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._log_lines: list[str] = []
 
         self._build_ui()
         self.root.after(150, self._drain_messages)
@@ -99,6 +101,7 @@ class TranscriberApp:
         self.start_button.pack(side="left")
         ttk.Button(action, text="בדוק GPU", command=self._diagnose_gpu).pack(side="left", padx=(8, 0))
         ttk.Button(action, text="מצב בדיקה", command=self._quick_test_settings).pack(side="left", padx=(8, 0))
+        ttk.Button(action, text="שמור דוח דיבאג", command=self._save_debug_report).pack(side="left", padx=(8, 0))
         ttk.Label(action, textvariable=self.status).pack(side="left", padx=12)
 
         self.progress_bar = ttk.Progressbar(frame, mode="indeterminate")
@@ -138,6 +141,54 @@ class TranscriberApp:
         for line in collect_cuda_diagnostics():
             self._append_log("  " + line)
 
+    def _current_settings(self) -> dict[str, str]:
+        return {
+            "model": self.model.get(),
+            "language": self.language.get(),
+            "device": self.device.get(),
+            "compute_type": self.compute_type.get(),
+        }
+
+    def _default_debug_report_path(self) -> Path:
+        base_dir = None
+        if self.output_dir.get():
+            base_dir = Path(self.output_dir.get())
+        elif self.input_path.get():
+            base_dir = Path(self.input_path.get()).parent / "transcripts"
+        else:
+            base_dir = Path.cwd()
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return base_dir / f"mh-transcriber-debug-{timestamp}.json"
+
+    def _write_debug_report(self, path: Path, error: BaseException | None = None) -> Path:
+        return write_debug_report(
+            path,
+            input_path=Path(self.input_path.get()) if self.input_path.get() else None,
+            output_dir=Path(self.output_dir.get()) if self.output_dir.get() else None,
+            settings=self._current_settings(),
+            recent_log=self._log_lines[-500:],
+            error=error,
+        )
+
+    def _save_debug_report(self) -> None:
+        default_path = self._default_debug_report_path()
+        path = filedialog.asksaveasfilename(
+            title="שמור דוח דיבאג",
+            initialdir=str(default_path.parent),
+            initialfile=default_path.name,
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            written = self._write_debug_report(Path(path))
+        except Exception as exc:  # noqa: BLE001 - surface report errors to user
+            messagebox.showerror("שגיאה", f"לא הצלחתי לשמור דוח דיבאג: {exc}")
+            return
+        self._append_log(f"Debug report written: {written}")
+        messagebox.showinfo("דוח דיבאג נשמר", str(written))
+
     def _quick_test_settings(self) -> None:
         self.model.set("base")
         self.device.set("cuda")
@@ -172,7 +223,12 @@ class TranscriberApp:
             )
             self._messages.put("DONE:" + "\n".join(f"{key}: {value}" for key, value in paths.items()))
         except Exception as exc:  # noqa: BLE001 - surface GUI errors to the user
-            self._messages.put("ERROR:" + str(exc))
+            try:
+                report_path = self._write_debug_report(self._default_debug_report_path(), error=exc)
+            except Exception as report_exc:  # noqa: BLE001 - include report failure in GUI error
+                self._messages.put("ERROR:" + f"{exc}\nDebug report failed: {report_exc}")
+            else:
+                self._messages.put("ERROR:" + f"{exc}\nDebug report: {report_path}")
 
     def _drain_messages(self) -> None:
         while True:
@@ -199,7 +255,10 @@ class TranscriberApp:
 
     def _append_log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log.insert("end", f"[{timestamp}] {message}\n")
+        line = f"[{timestamp}] {message}"
+        self._log_lines.append(line)
+        self._log_lines = self._log_lines[-1000:]
+        self.log.insert("end", line + "\n")
         self.log.see("end")
 
     def run(self) -> None:

@@ -97,6 +97,31 @@ function renderZoomVideoStatus(st) {
     return;
   }
 }
+function renderZoomTranscriptStatus(st) {
+  if (!st || st.kind !== 'zoom-transcripts') return;
+  const total = Math.max(0, +(st.total || 0));
+  const completed = Math.max(0, +(st.completed || 0));
+  const failed = Math.max(0, +(st.failed || 0));
+  const success = Math.max(0, +(st.success || 0));
+  if (total > 0) setProgress(Math.min(completed, total), total);
+  if (st.state === 'starting' || st.state === 'queued') {
+    setStatus(`📝 מכין חילוץ תמלילים ברקע: ${total} הקלטות`);
+  } else if (st.state === 'running') {
+    const idx = st.currentIndex || (completed + 1);
+    setStatus(`📝 מחלץ תמלילים ברקע: ${idx}/${total} — ${st.filename || ''} (${success} חולצו, ${failed} נכשלו)`);
+  } else if (st.state === 'item-done') {
+    setStatus(`📝 ${success}/${total} תמלילים חולצו (${failed} נכשלו)`);
+  } else if (st.state === 'item-error') {
+    setStatus(`📝 ${success}/${total} חולצו, ${failed} נכשלו — ${st.filename || ''}: ${st.error || ''}`);
+  } else if (st.state === 'complete') {
+    setProgress(total, total);
+    const label = failed ? `הסתיים חלקית: חולצו ${success}/${total} תמלילים` : `כל ${total} התמלילים חולצו`;
+    setStatus(`✅ ${label}. ירד ZIP${st.filename ? `: ${st.filename}` : ''}`);
+  } else if (st.state === 'error') {
+    setStatus(`❌ שגיאה בחילוץ תמלילים: ${st.error || ''}`);
+  }
+}
+
 function showView(name) {
   const views = {
     initial:   initialView,
@@ -1250,56 +1275,27 @@ $('downloadZoomLinks').addEventListener('click', async () => {
     const debugChk = document.getElementById('zoomDebugNetwork');
 
     if (wantTranscripts) {
-      const concurrency = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 3));
+      const requestedConcurrency = Math.max(1, +(CACHED_SETTINGS?.transcriptConcurrency || 3));
+      const concurrency = Math.max(1, Math.min(requestedConcurrency, 3));
       const fmt = CACHED_SETTINGS?.transcriptFormats || 'txt';
-      setStatus(`📝 מחלץ תמלילים מ-${withUrls.length} הקלטות (${concurrency} במקביל). הקלטות בלי תמליל ידלגו אחרי 8 שניות.`);
-      let transcripts = [];
-      try {
-        transcripts = await extractZoomTranscripts(
-          withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId })),
-          (done, total, rec) => setStatus(`📝 (${done}/${total}) ${rec.topic || rec.url}`),
+      setStatus(`📝 מוסר ${withUrls.length} תמלילים ל-background (${concurrency} במקביל). אפשר לסגור את הפופאפ אחרי שההודעה הזו מופיעה.`);
+      const resp = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'mh-extract-transcripts',
+          recordings: withUrls.map(r => ({ url: r.shareUrls[0], topic: r.topic, date: r.date, meetingId: r.meetingId })),
+          sourceUrl: zoomScanned.data?.pageUrl || '',
+          courseName: zoomHistoryTitle(withUrls),
           concurrency,
-        );
-      } catch (e) {
-        setStatus('📝 שגיאה בחילוץ תמלילים: ' + e.message);
-        transcripts = [];
-      }
-      const files = [];
-      files.push({ path: 'הקלטות.txt', blob: new Blob(['﻿' + buildZoomRecordingsText(outData)], { type: 'text/plain;charset=utf-8' }) });
-      const summary = [];
-      summary.push('Moodle Hoarder — Zoom Transcripts');
-      summary.push('===================================');
-      summary.push(`Captured at: ${new Date().toISOString()}`);
-      summary.push(`Total recordings: ${transcripts.length}`);
-      summary.push(`With transcript: ${transcripts.filter(tt => tt.vtt).length}`);
-      summary.push(`No transcript UI: ${transcripts.filter(tt => tt.skipReason === 'no-transcript-ui').length}`);
-      summary.push(`Timed out: ${transcripts.filter(tt => tt.skipReason === 'timeout').length}`);
-      summary.push(`Format: ${fmt}`);
-      summary.push('');
-      let okT = 0;
-      for (const tres of transcripts) {
-        const baseName = transcriptFileStem(tres.recording);
-        if (tres.vtt) {
-          if (fmt !== 'txt') files.push({ path: `${baseName}.vtt`, blob: new Blob([tres.vtt], { type: 'text/vtt;charset=utf-8' }) });
-          if (fmt !== 'vtt') files.push({ path: `${baseName}.txt`, blob: new Blob(['﻿' + tres.txt], { type: 'text/plain;charset=utf-8' }) });
-          summary.push(`✓ ${baseName}  (VTT ${tres.vtt.length}B, TXT ${tres.txt.length}B)`);
-          okT++;
-        } else {
-          summary.push(`✗ ${baseName}  — ${tres.error || 'unknown'}`);
-        }
-      }
-      files.push({ path: '_status.txt', blob: new Blob(['﻿' + summary.join('\r\n')], { type: 'text/plain;charset=utf-8' }) });
-      const zipBlob = await buildZip(files);
-      const date = new Date().toISOString().slice(0, 10);
-      const zipName = zoomZipFilename(withUrls, date);
-      await chrome.downloads.download({ url: URL.createObjectURL(zipBlob), filename: zipName, saveAs: !!CACHED_SETTINGS?.saveAs });
-      await appendDownloadHistory({
-        type: 'zoom-links', title: zoomHistoryTitle(withUrls), sourceUrl: zoomScanned.data?.pageUrl || '',
-        startedAt: Date.now(), finishedAt: Date.now(), status: okT === transcripts.length ? 'success' : 'partial',
-        itemCount: transcripts.length, successCount: okT, failedCount: transcripts.length - okT, bytes: zipBlob.size, filename: zipName,
+          format: fmt,
+          saveAs: !!CACHED_SETTINGS?.saveAs,
+        }, (r) => {
+          if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
+          else resolve(r);
+        });
       });
-      setStatus(`✅ ${zipName} — ${okT}/${transcripts.length} תמלילים חולצו.`);
-      notify('Moodle Hoarder', `Zoom: ${okT}/${transcripts.length} תמלילים, ${ok} URLs`);
+      if (!resp?.ok) throw new Error(resp?.error || 'background transcript job failed to start');
+      setStatus(`📝 חילוץ התמלילים רץ ברקע: 0/${withUrls.length}. אפשר לסגור את הפופאפ; בסוף תופיע התראה ויירד ZIP.`);
+      notify('Moodle Hoarder', `Zoom: חילוץ ${withUrls.length} תמלילים התחיל ברקע`);
     } else {
       // Transcripts off — just save the links text file.
       await saveZoomFile(outData);
@@ -1770,6 +1766,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.mhLastResearch?.newValue) mhShowResearchResult(changes.mhLastResearch.newValue);
   if (changes.mhDlStatus?.newValue) renderZoomVideoStatus(changes.mhDlStatus.newValue);
+  if (changes.mhTrStatus?.newValue) renderZoomTranscriptStatus(changes.mhTrStatus.newValue);
 });
 
 document.getElementById('cancelZoomDownload')?.addEventListener('click', async function () {
@@ -1786,8 +1783,9 @@ document.getElementById('cancelZoomDownload')?.addEventListener('click', async f
     setStatus('⏹ מבטל — ממתין לסיום ההורדה הנוכחית...');
   }
 });
-chrome.storage.local.get(['mhLastResearch', 'mhDlStatus']).then(async s => {
+chrome.storage.local.get(['mhLastResearch', 'mhDlStatus', 'mhTrStatus']).then(async s => {
   if (s.mhLastResearch?.json) mhShowResearchResult(s.mhLastResearch);
+  if (s.mhTrStatus?.kind === 'zoom-transcripts' && s.mhTrStatus.state !== 'complete') renderZoomTranscriptStatus(s.mhTrStatus);
   const dlSt = s.mhDlStatus;
   if (dlSt?.kind === 'zoom-videos' && dlSt.state !== 'complete' && dlSt.state !== 'cancelled') {
     renderZoomVideoStatus(dlSt);
@@ -1814,192 +1812,6 @@ chrome.storage.local.get(['mhLastResearch', 'mhDlStatus']).then(async s => {
     }
   }
 }).catch(() => {});
-
-// Build the text body Zoom recording lists use — kept identical to the
-// legacy saveZoomFile output so users who turn extractTranscripts off
-// still see the familiar format.
-function buildZoomRecordingsText(data) {
-  const lines = [];
-  lines.push('Moodle Hoarder — Zoom Recordings');
-  lines.push('================================');
-  lines.push(`Source: ${data.pageUrl || '?'}`);
-  lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
-  lines.push(`Found:  ${data.recordings.length} recordings`);
-  lines.push('');
-  lines.push('=========================================================');
-  lines.push('');
-  data.recordings.forEach((r, i) => {
-    lines.push(`#${i + 1}. ${r.topic || '(no topic)'}`);
-    if (r.meetingId) lines.push(`    Meeting ID: ${r.meetingId}`);
-    if (r.date)      lines.push(`    Date:       ${r.date}`);
-    const u = (r.shareUrls && r.shareUrls[0]) || r.detailUrl || '(no URL)';
-    lines.push(`    URL:        ${u}`);
-    lines.push('');
-  });
-  lines.push('=========================================================');
-  lines.push('');
-  const ok = data.recordings.filter(r => r.shareUrls?.length).length;
-  lines.push(`נמצאו קישורים ל-${ok} מתוך ${data.recordings.length} הקלטות.`);
-  return lines.join('\r\n');
-}
-
-// ========== Transcripts Phase 1 — real VTT extraction ==========
-// Now that the debug capture confirmed the URL pattern is
-//   /rec/play/vtt?type=transcript&fid=<token>&action=play
-// served as XHR with body starting "WEBVTT", Phase 1 is straightforward:
-// open each playback page in a hidden tab, install an XHR patch that
-// watches specifically for that pattern, and snapshot the body.
-//
-// Returns: array of { recording, vtt?, vttUrl?, txt?, error? }.
-
-async function extractZoomTranscripts(recordings, onProgress, concurrency) {
-  const out = new Array(recordings.length);
-  let nextIdx = 0;
-  let doneCount = 0;
-  const C = Math.max(1, Math.min(concurrency || 3, recordings.length));
-  async function worker() {
-    while (true) {
-      const myIdx = nextIdx++;
-      if (myIdx >= recordings.length) return;
-      const rec = recordings[myIdx];
-      try {
-        out[myIdx] = await extractOneTranscript(rec);
-      } catch (e) {
-        out[myIdx] = { recording: rec, error: String(e) };
-      }
-      doneCount++;
-      try { onProgress?.(doneCount, recordings.length, rec); } catch {}
-    }
-  }
-  await Promise.all(Array.from({ length: C }, worker));
-  return out;
-}
-
-// Extracts the VTT for a single recording. Workers in
-// extractZoomTranscripts call this in parallel — each one owns its tab,
-// so the global window.__mhVtt namespacing is fine (every tab has its
-// own MAIN world).
-async function extractOneTranscript(rec) {
-  let tab = null;
-  // Tunables. Initial settle = 4s gives the player time to mount.
-  // earlyDeadlineMs = if no transcript UI present by then, the player
-  // simply has no transcript → bail. hardDeadlineMs = absolute timeout
-  // even if UI promises one but it never lands (broken processing).
-  const INITIAL_SETTLE = 4000;
-  const EARLY_BAIL_MS = 8000;
-  const HARD_TIMEOUT_MS = 22000;
-  try {
-    tab = await chrome.tabs.create({ url: rec.url, active: false });
-    await new Promise(r => setTimeout(r, INITIAL_SETTLE));
-    // Install the watcher in MAIN world.
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
-      func: () => {
-        if (window.__mhVttInstalled) return;
-        window.__mhVttInstalled = true;
-        window.__mhVtt = null;
-        const isVtt = (u) => /\/rec\/play\/vtt\b[^?]*\??[^#]*type=transcript/i.test(u || '');
-        const origOpen = XMLHttpRequest.prototype.open;
-        const origSend = XMLHttpRequest.prototype.send;
-        XMLHttpRequest.prototype.open = function (method, url) {
-          this.__mhU = url;
-          return origOpen.apply(this, arguments);
-        };
-        XMLHttpRequest.prototype.send = function () {
-          if (isVtt(this.__mhU)) {
-            this.addEventListener('load', () => {
-              try {
-                if (this.status === 200) {
-                  const body = this.responseText || '';
-                  if (body.includes('WEBVTT')) {
-                    window.__mhVtt = { url: this.__mhU, body };
-                  }
-                }
-              } catch {}
-            });
-          }
-          return origSend.apply(this, arguments);
-        };
-        const origFetch = window.fetch;
-        window.fetch = async function (...args) {
-          const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
-          const res = await origFetch.apply(this, args);
-          if (isVtt(url)) {
-            try {
-              const body = await res.clone().text();
-              if (body.includes('WEBVTT')) {
-                window.__mhVtt = { url, body };
-              }
-            } catch {}
-          }
-          return res;
-        };
-      },
-    });
-    // Poll: every 600ms, check for VTT body + DOM signal for transcript UI.
-    // If no UI by the early-bail deadline, give up (saves ~15s per such
-    // recording when the lecturer disabled transcripts).
-    const start = Date.now();
-    let payload = null;
-    let earlyChecked = false;
-    while (Date.now() - start < HARD_TIMEOUT_MS) {
-      await new Promise(r => setTimeout(r, 600));
-      let snap = null;
-      try {
-        const [{ result }] = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          world: 'MAIN',
-          func: () => ({
-            vtt: window.__mhVtt || null,
-            // Multiple selectors because Zoom's React tree renames classes
-            // between versions. Any of these existing means transcripts
-            // are at least being prepared.
-            uiHints: {
-              transcriptClass: !!document.querySelector('[class*="transcript" i]'),
-              transcriptDataAttr: !!document.querySelector('[data-test*="transcript" i], [data-testid*="transcript" i]'),
-              ccButton: !!document.querySelector('button[aria-label*="transcript" i], button[aria-label*="caption" i], button[aria-label*="CC" i]'),
-              captionsTrack: !!document.querySelector('track[kind="captions"], track[kind="subtitles"]'),
-            },
-          }),
-        });
-        snap = result;
-      } catch {
-        // Tab navigated or got removed; keep polling.
-      }
-      if (snap?.vtt?.body) { payload = snap.vtt; break; }
-      if (!earlyChecked && Date.now() - start >= EARLY_BAIL_MS) {
-        earlyChecked = true;
-        const hints = snap?.uiHints || {};
-        const anyHint = hints.transcriptClass || hints.transcriptDataAttr || hints.ccButton || hints.captionsTrack;
-        if (!anyHint) {
-          return {
-            recording: rec,
-            error: 'No transcript UI in DOM after 8s — recording likely has no transcript',
-            skipReason: 'no-transcript-ui',
-          };
-        }
-      }
-    }
-    if (payload) {
-      return {
-        recording: rec,
-        vtt: payload.body,
-        vttUrl: payload.url,
-        txt: vttToCleanText(payload.body),
-      };
-    }
-    return {
-      recording: rec,
-      error: `Timeout: ${HARD_TIMEOUT_MS / 1000}s without transcript (UI promised one but it never arrived)`,
-      skipReason: 'timeout',
-    };
-  } finally {
-    if (tab?.id) {
-      try { await chrome.tabs.remove(tab.id); } catch {}
-    }
-  }
-}
 
 // Build a friendly filename stem for one recording. Uses the topic and
 // a normalised date (YYYY-MM-DD_HH-MM) when parseable, falling back to
@@ -2042,69 +1854,6 @@ function zoomHistoryTitle(recordings) {
   let dom = topics[0], max = 0;
   for (const [t, c] of counts) if (c > max) { dom = t; max = c; }
   return topics.length > 1 ? `${dom} — ${topics.length} הקלטות` : dom;
-}
-
-function zoomZipFilename(recordings, isoDate) {
-  const topics = recordings.map(r => (r.topic || '').trim()).filter(Boolean);
-  if (topics.length) {
-    const counts = new Map();
-    for (const t of topics) counts.set(t, (counts.get(t) || 0) + 1);
-    let dom = null, max = 0;
-    for (const [t, c] of counts) if (c > max) { max = c; dom = t; }
-    if (dom && max / topics.length >= 0.7) {
-      const cleanTopic = sanitizeFilename(dom) || 'zoom';
-      return `${cleanTopic} הקלטות_${isoDate}.zip`;
-    }
-  }
-  return `zoom-recordings_${isoDate}.zip`;
-}
-
-// Convert a raw WebVTT blob into readable timestamped text.
-//   - Strips the WEBVTT header, NOTE blocks, X-TIMESTAMP-MAP, cue numbers.
-//   - Replaces "HH:MM:SS.fff --> HH:MM:SS.fff" with a leading "[HH:MM:SS] ".
-//   - One cue per line (no paragraph grouping by speaker — timestamps
-//     already provide natural separation, and grouping was hiding when a
-//     speaker said something brief then resumed).
-//   - Keeps the "Speaker: text" label as it appears in the VTT.
-// User request: "convert VTT to text including timestamps, no need for
-// a separate VTT file in the ZIP, this is enough".
-function vttToCleanText(vtt) {
-  if (!vtt) return '';
-  const lines = vtt.split(/\r?\n/);
-  const out = [];
-  let currentStart = null;
-  let buffer = [];
-  const flushCue = () => {
-    if (!buffer.length) return;
-    const text = buffer.join(' ').replace(/\s+/g, ' ').trim();
-    if (text) out.push(currentStart ? `[${currentStart}] ${text}` : text);
-    buffer = [];
-  };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line === 'WEBVTT' || line.startsWith('WEBVTT')) continue;
-    if (line.startsWith('NOTE') || line.startsWith('X-TIMESTAMP-MAP') || line.startsWith('STYLE')) continue;
-    if (/^\d+$/.test(line)) continue;          // cue number
-    // Timestamp line — "00:00:04.418 --> 00:00:18.504" (sometimes with
-    // alignment / position metadata after). We start a new cue here.
-    const tsMatch = line.match(/^(\d{1,2}:\d{2}:\d{2})[.,]\d+\s*-->\s*\d/);
-    if (tsMatch) {
-      flushCue();
-      currentStart = tsMatch[1];
-      continue;
-    }
-    // Some VTTs use M:SS without an hours component
-    const tsMatch2 = line.match(/^(\d{1,2}:\d{2})[.,]\d+\s*-->\s*\d/);
-    if (tsMatch2) {
-      flushCue();
-      currentStart = tsMatch2[1];
-      continue;
-    }
-    if (!line) { flushCue(); continue; }
-    buffer.push(line);
-  }
-  flushCue();
-  return out.join('\n');
 }
 
 // ========== Transcripts Phase 0 (legacy debug capture) ==========

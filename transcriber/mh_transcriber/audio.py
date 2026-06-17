@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -43,14 +44,14 @@ def _resolve_ffmpeg_executable() -> str:
     if ffmpeg:
         return ffmpeg
 
-    try:
-        import imageio_ffmpeg
-    except ImportError as exc:
+    if importlib.util.find_spec("imageio_ffmpeg") is None:
         requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
         raise RuntimeError(
             "ffmpeg was not found. Run transcriber\\run_gui_windows.bat to install bundled ffmpeg support, "
             f"or install manually with: {sys.executable} -m pip install -r {requirements_path}"
-        ) from exc
+        )
+    import imageio_ffmpeg
+
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 

@@ -38,6 +38,37 @@ def _resolve_compute_type(device: Device, compute_type: ComputeType) -> str:
 
 
 
+def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> None:
+    """Load PyAV audio submodules that faster-whisper expects as av.audio.*.
+
+    Some PyAV builds do not expose ``av.audio`` until an audio submodule is
+    imported explicitly. Without this, faster-whisper can fail with:
+    ``module 'av' has no attribute 'audio'`` right before decoding.
+    """
+
+    if importlib.util.find_spec("av") is None:
+        return
+    try:
+        import importlib
+
+        import av
+
+        importlib.import_module("av.audio")
+        importlib.import_module("av.audio.resampler")
+        importlib.import_module("av.audio.frame")
+        if not hasattr(av, "audio"):
+            raise AttributeError("PyAV did not expose av.audio after importing audio submodules")
+    except Exception as exc:  # noqa: BLE001 - provide actionable GUI error instead of raw AttributeError
+        requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
+        raise RuntimeError(
+            "PyAV/faster-whisper audio decoder is not initialized correctly. "
+            "Close the transcriber and run transcriber\\run_gui_windows.bat so dependencies can update. "
+            f"Manual fix: {sys.executable} -m pip install --upgrade --force-reinstall -r {requirements_path}"
+        ) from exc
+    if progress:
+        progress("PyAV audio decoder initialized.")
+
+
 def _load_whisper_model_with_heartbeat(
     *,
     model_cls: object,
@@ -142,6 +173,8 @@ def transcribe_file(
 
         if device in {"cuda", "auto"}:
             log_cuda_diagnostics(progress)
+
+        _prime_pyav_audio_namespace(progress)
 
         if progress:
             progress("Model loaded. Starting transcription...")
