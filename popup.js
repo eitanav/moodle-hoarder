@@ -97,28 +97,49 @@ function renderZoomVideoStatus(st) {
     return;
   }
 }
+// Stable failure-key → short Hebrew label. Mirrors _mhTrFailureKey in background.js.
+const TR_REASON_LABEL = {
+  'no-transcript': 'ללא תמלול ב-Zoom',
+  'timeout': 'timeout',
+  'cancelled': 'בוטלו',
+  'auth': 'דרושה התחברות',
+  'tab-error': 'שגיאת טאב',
+  'other': 'שגיאות אחרות',
+};
+
+function formatTranscriptFailureBreakdown(reasons) {
+  if (!reasons || typeof reasons !== 'object') return '';
+  const entries = Object.entries(reasons).filter(([, n]) => n > 0);
+  if (!entries.length) return '';
+  entries.sort((a, b) => b[1] - a[1]);
+  return entries.map(([key, n]) => `${n} ${TR_REASON_LABEL[key] || key}`).join(', ');
+}
+
 function renderZoomTranscriptStatus(st) {
   if (!st || st.kind !== 'zoom-transcripts') return;
   const total = Math.max(0, +(st.total || 0));
   const completed = Math.max(0, +(st.completed || 0));
   const failed = Math.max(0, +(st.failed || 0));
   const success = Math.max(0, +(st.success || 0));
+  const reasonsTxt = formatTranscriptFailureBreakdown(st.failureReasons);
+  const failedTxt = failed ? (reasonsTxt ? `${failed} נכשלו (${reasonsTxt})` : `${failed} נכשלו`) : '0 נכשלו';
   if (total > 0) setProgress(Math.min(completed, total), total);
   if (st.state === 'starting' || st.state === 'queued') {
     setStatus(`📝 מכין חילוץ תמלילים ברקע: ${total} הקלטות`);
   } else if (st.state === 'running') {
     const idx = st.currentIndex || (completed + 1);
-    setStatus(`📝 מחלץ תמלילים ברקע: ${idx}/${total} — ${st.filename || ''} (${success} חולצו, ${failed} נכשלו)`);
+    setStatus(`📝 מחלץ תמלילים ברקע: ${idx}/${total} — ${st.filename || ''} (${success} חולצו, ${failedTxt})`);
   } else if (st.state === 'item-done') {
-    setStatus(`📝 ${success}/${total} תמלילים חולצו (${failed} נכשלו)`);
+    setStatus(`📝 ${success}/${total} תמלילים חולצו (${failedTxt})`);
   } else if (st.state === 'item-error') {
-    setStatus(`📝 ${success}/${total} חולצו, ${failed} נכשלו — ${st.filename || ''}: ${st.error || ''}`);
+    setStatus(`📝 ${success}/${total} חולצו, ${failedTxt} — ${st.filename || ''}: ${st.error || ''}`);
   } else if (st.state === 'complete') {
     setProgress(total, total);
-    const label = failed ? `הסתיים חלקית: חולצו ${success}/${total} תמלילים` : `כל ${total} התמלילים חולצו`;
+    const label = failed ? `הסתיים חלקית: חולצו ${success}/${total} תמלילים (${reasonsTxt || `${failed} נכשלו`})` : `כל ${total} התמלילים חולצו`;
     setStatus(`✅ ${label}. ירד ZIP${st.filename ? `: ${st.filename}` : ''}`);
   } else if (st.state === 'error') {
-    setStatus(`❌ שגיאה בחילוץ תמלילים: ${st.error || ''}`);
+    const tail = reasonsTxt ? ` — ${reasonsTxt}` : '';
+    setStatus(`❌ שגיאה בחילוץ תמלילים: ${st.error || ''}${tail}`);
   }
 }
 
