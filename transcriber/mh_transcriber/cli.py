@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .debug_report import write_debug_report
 from .diagnostics import collect_cuda_diagnostics
 from .engine import DEFAULT_MODEL, RECOMMENDED_MODELS, transcribe_file
 
@@ -29,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the ffmpeg WAV preparation step and pass the input directly to faster-whisper",
     )
+    parser.add_argument(
+        "--debug-report",
+        type=Path,
+        default=None,
+        help="Write a JSON debug report to this path and exit unless an input transcription is requested",
+    )
     return parser
 
 
@@ -40,11 +47,41 @@ def main(argv: list[str] | None = None) -> int:
         for line in collect_cuda_diagnostics():
             print("  " + line)
         return 0
+    if args.debug_report and args.input is None:
+        path = write_debug_report(
+            args.debug_report,
+            settings={
+                "model": args.model,
+                "language": args.language,
+                "device": args.device,
+                "compute_type": args.compute_type,
+                "beam_size": args.beam_size,
+                "preprocess_audio": not args.no_preprocess_audio,
+            },
+        )
+        print(f"debug_report: {path}")
+        return 0
     if args.input is None:
-        build_parser().error("input is required unless --diagnose-gpu is used")
+        build_parser().error("input is required unless --diagnose-gpu or --debug-report is used")
 
     def log(message: str) -> None:
         print(message, flush=True)
+
+    if args.debug_report:
+        path = write_debug_report(
+            args.debug_report,
+            input_path=args.input,
+            output_dir=args.out,
+            settings={
+                "model": args.model,
+                "language": args.language,
+                "device": args.device,
+                "compute_type": args.compute_type,
+                "beam_size": args.beam_size,
+                "preprocess_audio": not args.no_preprocess_audio,
+            },
+        )
+        print(f"debug_report: {path}")
 
     paths = transcribe_file(
         input_path=args.input,
