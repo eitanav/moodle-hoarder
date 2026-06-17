@@ -4,6 +4,17 @@
 
 ---
 
+## v2.5.2 — חשיפת השגיאה האמיתית ב-Transcriber + תיקון venv פגום
+
+**הבעיה:** משתמש קיבל דיאלוג `PyAV/faster-whisper audio decoder is not initialized correctly` בלי שום רמז לסיבה — כי עטפנו *כל* חריגה בהודעת "תתקין מחדש" גנרית והסתרנו את השגיאה האמיתית. ה-traceback האמיתי הראה שזו בכלל לא בעיית PyAV אלא `.venv` פגום: קובץ `distutils-precedence.pth` נכשל ב-`site.addpackage` בכל הרצה של python (AttributeError/UnicodeDecodeError, נפוץ ב-Windows עם locale עברי).
+
+- **`engine.py` — חשיפת השגיאה האמיתית** — `_prime_pyav_audio_namespace()` כולל כעת `Underlying error: <type>: <message>` בהודעת ה-RuntimeError, עם הנחיה ספציפית: אם השגיאה מזכירה `site`/`addpackage`/`.pth`/`distutils`/`UnicodeDecodeError` — ה-`.venv` פגום וצריך למחוק ולבנות מחדש, לא PyAV
+- **`setup_windows.bat`** — משדרג כעת גם `setuptools` ו-`wheel` (לא רק pip), מה שמונע את התקלה של `distutils-precedence.pth`/`_distutils_hack` מלכתחילה
+- **`run_gui_windows.bat`** — בתיקון תלויות: משדרג setuptools/wheel, עושה `--force-reinstall`, ואז **מאמת את מפענח האודיו בגלוי** (בלי `>nul`) כדי שכשל אמיתי של PyAV יציג traceback אמיתי במקום להפעיל GUI שבור בשקט
+- **תיעוד** — נוסף ל-`transcriber/README.md` הסבר על השגיאה ועל הפתרון (מחיקת `.venv` ובנייה מחדש)
+
+---
+
 ## v2.5.1 — תיקון ZIP ב-offscreen + חוסן בקריאות subprocess/segment
 
 **הבעיה:** יצירת ה-ZIP של התמלולים נכשלה ב-offscreen document; בנוסף, פלט של תהליכי משנה (nvidia-smi וכו') בדוח הדיבאג ופלט מקטעי תמלול יכלו להגיע כ-`None`/`bytes` ולהפיל את התהליך.
