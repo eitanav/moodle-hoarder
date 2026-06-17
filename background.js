@@ -917,6 +917,22 @@ async function _mhTrExtractWithRetry(rec) {
   return { ...first, attempts };
 }
 
+// Bucket per-item failure into a short stable key so the popup can show a
+// running breakdown (e.g. "4 ללא תמלול ב-Zoom") instead of just "4 נכשלו".
+// Order matters: the first match wins.
+function _mhTrFailureKey(res) {
+  const skip = (res?.skipReason || '').toLowerCase();
+  if (skip === 'no-transcript-ui') return 'no-transcript';
+  if (skip === 'timeout') return 'timeout';
+  if (skip === 'cancelled') return 'cancelled';
+  const err = String(res?.error || '').toLowerCase();
+  if (/cancel/.test(err)) return 'cancelled';
+  if (/timeout|no transcript ui|after \d+s without/.test(err)) return /no transcript/.test(err) ? 'no-transcript' : 'timeout';
+  if (/sign in|signin|log ?in|password|denied|forbidden|403|401/.test(err)) return 'auth';
+  if (/tab|navigation|executescript|cannot access|script/.test(err)) return 'tab-error';
+  return 'other';
+}
+
 async function _mhStartTranscriptJob(msg) {
   if (_mhTrBusy) return { ok: false, error: 'transcript job already running' };
   const recordings = (msg.recordings || []).filter(r => r && r.url);
@@ -926,8 +942,8 @@ async function _mhStartTranscriptJob(msg) {
   const startedAt = Date.now();
   const concurrency = Math.max(1, Math.min(+(msg.concurrency || 3), recordings.length));
   const fmt = msg.format || 'txt';
-  _mhTrBatch = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, total: recordings.length, completed: 0, failed: 0, success: 0, startedAt, recordings, sourceUrl: msg.sourceUrl || '', courseName: msg.courseName || '' };
-  _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'starting', batchId: _mhTrBatch.id, total: recordings.length, completed: 0, failed: 0, success: 0, remaining: recordings.length, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+  _mhTrBatch = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, total: recordings.length, completed: 0, failed: 0, success: 0, startedAt, recordings, sourceUrl: msg.sourceUrl || '', courseName: msg.courseName || '', failureReasons: {} };
+  _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'starting', batchId: _mhTrBatch.id, total: recordings.length, completed: 0, failed: 0, success: 0, remaining: recordings.length, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl, failureReasons: {} });
 
   (async () => {
     const results = new Array(recordings.length);
@@ -942,9 +958,15 @@ async function _mhStartTranscriptJob(msg) {
         try { res = await _mhTrExtractWithRetry(rec); }
         catch (e) { res = { recording: rec, error: String(e), attempts: [] }; }
         results[i] = res;
-        if (res.vtt) _mhTrBatch.success++; else _mhTrBatch.failed++;
+        if (res.vtt) {
+          _mhTrBatch.success++;
+        } else {
+          _mhTrBatch.failed++;
+          const key = _mhTrFailureKey(res);
+          _mhTrBatch.failureReasons[key] = (_mhTrBatch.failureReasons[key] || 0) + 1;
+        }
         _mhTrBatch.completed++;
-        await _mhSetTrStatus({ kind: 'zoom-transcripts', state: res.vtt ? 'item-done' : 'item-error', batchId: _mhTrBatch.id, currentIndex: i + 1, total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: recordings.length - _mhTrBatch.completed, filename: rec.topic || rec.url, error: res.error || '', concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+        await _mhSetTrStatus({ kind: 'zoom-transcripts', state: res.vtt ? 'item-done' : 'item-error', batchId: _mhTrBatch.id, currentIndex: i + 1, total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: recordings.length - _mhTrBatch.completed, filename: rec.topic || rec.url, error: res.error || '', skipReason: res.skipReason || '', failureReasons: { ..._mhTrBatch.failureReasons }, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
       }
     }
     let zipName = '';
@@ -986,11 +1008,11 @@ async function _mhStartTranscriptJob(msg) {
       await chrome.downloads.download({ url, filename: zipName, saveAs: !!msg.saveAs });
       setTimeout(() => { try { chrome.runtime.sendMessage({ type: 'mh-offscreen-revoke', blobUrl: url }); } catch {} }, 60_000);
       const status = okT === recordings.length ? 'success' : (okT ? 'partial' : 'failed');
-      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'complete', batchId: _mhTrBatch.id, status, total: recordings.length, completed: recordings.length, failed: recordings.length - okT, success: okT, remaining: 0, filename: zipName, bytes: zipSize, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'complete', batchId: _mhTrBatch.id, status, total: recordings.length, completed: recordings.length, failed: recordings.length - okT, success: okT, remaining: 0, filename: zipName, bytes: zipSize, failureReasons: { ..._mhTrBatch.failureReasons }, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
       await _mhAppendHistory({ type: 'zoom-links', title: _mhTrHistoryTitle(recordings), sourceUrl: msg.sourceUrl || '', startedAt, finishedAt: Date.now(), status, itemCount: recordings.length, successCount: okT, failedCount: recordings.length - okT, bytes: zipSize, filename: zipName });
       _mhNotify(`Zoom תמלילים: חולצו ${okT}/${recordings.length}. ${zipName}`, 'Moodle Hoarder — Zoom');
     } catch (e) {
-      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'error', batchId: _mhTrBatch.id, error: String(e), total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: Math.max(0, recordings.length - _mhTrBatch.completed), concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'error', batchId: _mhTrBatch.id, error: String(e), total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: Math.max(0, recordings.length - _mhTrBatch.completed), failureReasons: { ..._mhTrBatch.failureReasons }, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
       _mhNotify('שגיאה בחילוץ תמלילים: ' + String(e), 'Moodle Hoarder — Zoom');
     } finally {
       _mhTrBusy = false;
