@@ -4,6 +4,18 @@
 
 ---
 
+## v2.5.1 — תיקון ZIP ב-offscreen + חוסן בקריאות subprocess/segment
+
+**הבעיה:** יצירת ה-ZIP של התמלולים נכשלה ב-offscreen document; בנוסף, פלט של תהליכי משנה (nvidia-smi וכו') בדוח הדיבאג ופלט מקטעי תמלול יכלו להגיע כ-`None`/`bytes` ולהפיל את התהליך.
+
+- **תיקון יצירת ZIP ב-offscreen** — `offscreen.js`/`offscreen.html` כוללים כעת את `zip.js` ומטפלים בהודעות `mh-offscreen-build-zip`/`mh-offscreen-fetch`, יוצרים `blob:` URL ל-ZIP ונופלים חזרה לעוגן הורדה במידת הצורך (כבר נכלל ב-main, מתועד כאן)
+- **`_safe_text()` חדש ב-`debug_report.py`** — ממיר פלט subprocess בבטחה (`None`/`bytes`/`str`) לפני כתיבה לדוח, במקום `.strip()` ישיר שיכול היה להיכשל
+- **הגנה על טקסט מקטע ב-`engine.py`** — `str(segment.text or '').strip()` מונע קריסה כש-faster-whisper מחזיר מקטע בלי טקסט
+- **ניקוי `import importlib`** ב-`engine.py` — הועבר לראש הקובץ במקום import מקומי בתוך הפונקציה
+- **בדיקה `test_safe_text_handles_none_bytes_and_strings`** — מכסה `None`/`bytes`/`str`
+
+---
+
 ## v2.5.0 — הורדת מודל מפורשת + חוסן PyAV נוסף ב-Transcriber
 
 **הבעיה:** בריצה ראשונה, `faster-whisper` מוריד את המודל מ-Hugging Face בלי שום פס התקדמות גלוי — נראה כאילו התוכנה תקועה על "Loading model...". בנוסף, בנייה מסוימת של PyAV ב-Windows חושפת את `av.audio` אבל לא את `av.audio.resampler`, מה שעדיין הפיל את התיקון מ-v2.4.0.
