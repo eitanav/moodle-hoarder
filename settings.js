@@ -83,7 +83,8 @@ const SETTINGS_DEFAULTS = {
   // When true, after the share URL extraction the extension opens each
   // recording in a hidden background tab, intercepts the VTT XHR, and
   // bundles transcripts (both raw .vtt and cleaned .txt) into the output
-  // ZIP. Parallelized 3-at-a-time (see transcriptConcurrency).
+  // ZIP. Defaults to sequential extraction because Zoom player tabs are heavy
+  // and parallel playback can make VTT capture flaky on some machines.
   extractTranscripts: true,
 
   // Which transcript file formats to include in the ZIP.
@@ -96,9 +97,9 @@ const SETTINGS_DEFAULTS = {
   transcriptFormats: 'txt',
 
   // How many transcripts to extract simultaneously. Each one opens a
-  // background tab that runs Zoom's player + auth, so going much higher
-  // than ~3 starts to thrash memory and risk Zoom rate-limits.
-  transcriptConcurrency: 3,
+  // background tab that runs Zoom's player + auth. Keep the default at 1 for
+  // reliability; users can raise it in options if they prefer speed.
+  transcriptConcurrency: 1,
 
   // meyda.ariel.ac.il syllabus detour (v1.22). meyda serves an Angular
   // SPA that renders the PDF only after a click on "הדפס". Debug captures
