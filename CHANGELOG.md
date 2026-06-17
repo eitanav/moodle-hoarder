@@ -4,6 +4,15 @@
 
 ---
 
+## v2.3.2 — Debug Report ב-Transcriber
+
+- **`debug_report.py`** — מפיק JSON אבחון שלם: פלטפורמה, Python, גרסאות חבילות (faster-whisper, ctranslate2, av, numpy, onnxruntime, huggingface-hub, tokenizers, imageio-ffmpeg, tkinterdnd2), בדיקת modules, ffmpeg path, media probe, CUDA diagnostics, הגדרות, שגיאות + traceback
+- **`--debug-report PATH`** ב-CLI — שמירת JSON אבחון. עובד גם לבד (בלי input) — שימושי לדיווח באג
+- **`run_gui.py` warmup** — טעינה מקדימה של `av.audio`/`av.audio.resampler`/`av.audio.frame` למניעת ImportError ב-GUI
+- **בדיקות `test_debug_report.py`** — schema, settings, recent_log, JSON writer
+
+---
+
 ## v2.3.1 — Heartbeat בטעינת מודל + הגנת .venv ב-update.bat
 
 - **Heartbeat בטעינת מודל** — כל 30 שניות בזמן טעינה ראשונה מדפיס "Still loading model X (Y min elapsed)..." — הגיוי לא נראה תקוע
