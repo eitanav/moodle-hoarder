@@ -4,7 +4,7 @@
 //   'queue'     → one item: "הוסף לתור Moodle Hoarder" (always queues)
 //   'ask'       → two items: download-now + add-to-queue (user picks each time)
 
-importScripts('settings.js');
+importScripts('settings.js', 'zip.js');
 
 const QUEUE_KEY = 'rightClickQueue';
 const PATTERNS = ['*://moodlearn.ariel.ac.il/*', '*://*.ariel.ac.il/*'];
@@ -660,6 +660,344 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   _mhProcessQueue();
   sendResponse?.({ ok: true, queued: _mhDlQueue.length, total: _mhDlBatch?.total || 1 });
   return true;
+});
+
+
+// ========== Zoom transcript extraction (background service worker) ==========
+// Popup resolves share/play URLs, then hands the heavy VTT extraction to this
+// worker so closing the popup no longer kills the transcript job.
+let _mhTrBusy = false;
+let _mhTrCancelRequested = false;
+let _mhTrBatch = null;
+
+async function _mhSetTrStatus(obj) {
+  try { await chrome.storage.local.set({ mhTrStatus: { at: Date.now(), ...obj } }); } catch {}
+}
+
+function _mhTrTextBlob(s, type = 'text/plain;charset=utf-8') {
+  return new Blob([s], { type });
+}
+
+function _mhTrSanitizeFilename(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/[_\s]*_[_\s]*/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/[. ]+$/, '')
+    .trim()
+    .slice(0, 120);
+}
+
+function _mhTrTranscriptFileStem(rec) {
+  const topic = _mhTrSanitizeFilename(rec.topic || '') || 'recording';
+  let dateBit = '';
+  if (rec.date) {
+    const d = new Date(rec.date);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      const da = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      dateBit = `_${y}-${mo}-${da}_${hh}-${mm}`;
+    } else {
+      const sanitised = (rec.date || '').replace(/[^\w-]+/g, '_').slice(0, 24);
+      if (sanitised) dateBit = `_${sanitised}`;
+    }
+  }
+  return `${topic}${dateBit}`;
+}
+
+function _mhTrZipFilename(recordings, isoDate) {
+  const topics = (recordings || []).map(r => (r.topic || '').trim()).filter(Boolean);
+  if (topics.length) {
+    const counts = new Map();
+    for (const t of topics) counts.set(t, (counts.get(t) || 0) + 1);
+    let dom = null, max = 0;
+    for (const [t, c] of counts) if (c > max) { max = c; dom = t; }
+    if (dom && max / topics.length >= 0.7) return `${_mhTrSanitizeFilename(dom) || 'zoom'} הקלטות_${isoDate}.zip`;
+  }
+  return `zoom-recordings_${isoDate}.zip`;
+}
+
+function _mhTrHistoryTitle(recordings) {
+  const topics = (recordings || []).map(r => (r.topic || '').trim()).filter(Boolean);
+  if (!topics.length) return 'Zoom transcripts';
+  const counts = new Map();
+  for (const t of topics) counts.set(t, (counts.get(t) || 0) + 1);
+  let dom = topics[0], max = 0;
+  for (const [t, c] of counts) if (c > max) { dom = t; max = c; }
+  return topics.length > 1 ? `${dom} — ${topics.length} הקלטות` : dom;
+}
+
+function _mhTrVttToCleanText(vtt) {
+  if (!vtt) return '';
+  const lines = vtt.split(/\r?\n/);
+  const out = [];
+  let currentStart = null;
+  let buffer = [];
+  const flushCue = () => {
+    if (!buffer.length) return;
+    const text = buffer.join(' ').replace(/\s+/g, ' ').trim();
+    if (text) out.push(currentStart ? `[${currentStart}] ${text}` : text);
+    buffer = [];
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === 'WEBVTT' || line.startsWith('WEBVTT')) continue;
+    if (line.startsWith('NOTE') || line.startsWith('X-TIMESTAMP-MAP') || line.startsWith('STYLE')) continue;
+    if (/^\d+$/.test(line)) continue;
+    const tsMatch = line.match(/^(\d{1,2}:\d{2}:\d{2})[.,]\d+\s*-->\s*\d/);
+    if (tsMatch) { flushCue(); currentStart = tsMatch[1]; continue; }
+    const tsMatch2 = line.match(/^(\d{1,2}:\d{2})[.,]\d+\s*-->\s*\d/);
+    if (tsMatch2) { flushCue(); currentStart = tsMatch2[1]; continue; }
+    if (!line) { flushCue(); continue; }
+    buffer.push(line);
+  }
+  flushCue();
+  return out.join('\n');
+}
+
+function _mhTrRecordingsText(data) {
+  const lines = [];
+  lines.push('Moodle Hoarder — Zoom Recordings');
+  lines.push('================================');
+  lines.push(`Source: ${data.sourceUrl || '?'}`);
+  lines.push(`Date:   ${new Date().toLocaleString('he-IL')}`);
+  lines.push(`Found:  ${data.recordings.length} recordings`);
+  lines.push('');
+  lines.push('=========================================================');
+  lines.push('');
+  data.recordings.forEach((r, i) => {
+    lines.push(`#${i + 1}. ${r.topic || '(no topic)'}`);
+    if (r.meetingId) lines.push(`    Meeting ID: ${r.meetingId}`);
+    if (r.date) lines.push(`    Date:       ${r.date}`);
+    lines.push(`    URL:        ${r.url || '(no URL)'}`);
+    lines.push('');
+  });
+  lines.push('=========================================================');
+  lines.push('');
+  lines.push(`נמצאו קישורים ל-${data.recordings.filter(r => r.url).length} מתוך ${data.recordings.length} הקלטות.`);
+  return lines.join('\r\n');
+}
+
+async function _mhTrExtractOne(rec, opts = {}) {
+  let tab = null;
+  const retry = !!opts.retry;
+  const debug = { attempt: opts.attempt || 1, retry, snapshots: [] };
+  const INITIAL_SETTLE = retry ? 6500 : 4500;
+  const EARLY_BAIL_MS = retry ? 16000 : 12000;
+  const HARD_TIMEOUT_MS = retry ? 45000 : 32000;
+  try {
+    tab = await chrome.tabs.create({ url: rec.url, active: false });
+    debug.tabId = tab.id || null;
+    await new Promise(r => setTimeout(r, INITIAL_SETTLE));
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, world: 'MAIN',
+      func: () => {
+        if (window.__mhVttInstalled) return;
+        window.__mhVttInstalled = true;
+        window.__mhVtt = null;
+        window.__mhVttSeen = [];
+        const isVtt = (u) => /\/rec\/play\/vtt\b[^?]*\??[^#]*type=transcript/i.test(u || '');
+        const remember = (url, source, status, body) => {
+          try { window.__mhVttSeen.push({ url: String(url || ''), source, status: status || 0, bytes: body ? body.length : 0, at: Date.now() }); } catch {}
+          if (body && body.includes('WEBVTT')) window.__mhVtt = { url, body, source };
+        };
+        const fetchVtt = async (url, source) => {
+          if (!url) return;
+          try {
+            const res = await fetch(url, { credentials: 'include' });
+            const body = await res.clone().text();
+            remember(url, source, res.status, body);
+          } catch (e) { remember(url, source + ':error:' + String(e), 0, ''); }
+        };
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) { this.__mhU = url; return origOpen.apply(this, arguments); };
+        XMLHttpRequest.prototype.send = function () {
+          if (isVtt(this.__mhU)) {
+            this.addEventListener('load', () => {
+              try { if (this.status === 200) remember(this.__mhU, 'xhr', this.status, this.responseText || ''); } catch {}
+            });
+          }
+          return origSend.apply(this, arguments);
+        };
+        const origFetch = window.fetch;
+        window.fetch = async function (...args) {
+          const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
+          const res = await origFetch.apply(this, args);
+          if (isVtt(url)) {
+            try { remember(url, 'fetch', res.status, await res.clone().text()); } catch {}
+          }
+          return res;
+        };
+        try {
+          for (const entry of performance.getEntriesByType('resource')) {
+            const url = entry && entry.name;
+            if (isVtt(url)) fetchVtt(url, 'performance');
+          }
+        } catch {}
+        try {
+          for (const btn of document.querySelectorAll('button, [role="button"], [aria-label], [title]')) {
+            const txt = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+            if (/transcript|caption|cc|תמל|כתוב/.test(txt) && btn.offsetParent !== null) { btn.click(); break; }
+          }
+        } catch {}
+      },
+    });
+    const start = Date.now();
+    let payload = null;
+    let earlyChecked = false;
+    while (Date.now() - start < HARD_TIMEOUT_MS) {
+      if (_mhTrCancelRequested) return { recording: rec, error: 'cancelled', skipReason: 'cancelled', debug };
+      await new Promise(r => setTimeout(r, 600));
+      let snap = null;
+      try {
+        const [{ result }] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, world: 'MAIN',
+          func: () => ({
+            vtt: window.__mhVtt || null,
+            seen: window.__mhVttSeen || [],
+            uiHints: {
+              transcriptClass: !!document.querySelector('[class*="transcript" i]'),
+              transcriptDataAttr: !!document.querySelector('[data-test*="transcript" i], [data-testid*="transcript" i]'),
+              ccButton: !!document.querySelector('button[aria-label*="transcript" i], button[aria-label*="caption" i], button[aria-label*="CC" i]'),
+              captionsTrack: !!document.querySelector('track[kind="captions"], track[kind="subtitles"]'),
+            },
+          }),
+        });
+        snap = result;
+        if (snap && debug.snapshots.length < 8) debug.snapshots.push({ seenCount: (snap.seen || []).length, lastSeen: (snap.seen || []).slice(-2), uiHints: snap.uiHints || {} });
+      } catch (e) { debug.snapshots.push({ error: String(e) }); }
+      if (snap?.vtt?.body) { payload = snap.vtt; break; }
+      if (!earlyChecked && Date.now() - start >= EARLY_BAIL_MS) {
+        earlyChecked = true;
+        const hints = snap?.uiHints || {};
+        if (!(hints.transcriptClass || hints.transcriptDataAttr || hints.ccButton || hints.captionsTrack)) {
+          return { recording: rec, error: `No transcript UI in DOM after ${EARLY_BAIL_MS / 1000}s`, skipReason: 'no-transcript-ui', debug };
+        }
+      }
+    }
+    if (payload) return { recording: rec, vtt: payload.body, vttUrl: payload.url, txt: _mhTrVttToCleanText(payload.body), debug };
+    return { recording: rec, error: `Timeout: ${HARD_TIMEOUT_MS / 1000}s without transcript`, skipReason: 'timeout', debug };
+  } finally {
+    if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch {} }
+  }
+}
+
+async function _mhTrExtractWithRetry(rec) {
+  const attempts = [];
+  let first = await _mhTrExtractOne(rec, { attempt: 1 });
+  attempts.push({ attempt: 1, ok: !!first.vtt, error: first.error || '', skipReason: first.skipReason || '', debug: first.debug || null });
+  if (!first.vtt && /timeout|no-transcript-ui|script|tab/i.test(first.skipReason || first.error || '')) {
+    await new Promise(r => setTimeout(r, 1000));
+    const second = await _mhTrExtractOne(rec, { attempt: 2, retry: true });
+    attempts.push({ attempt: 2, ok: !!second.vtt, error: second.error || '', skipReason: second.skipReason || '', debug: second.debug || null });
+    first = second.vtt ? second : { ...first, attempts };
+  }
+  return { ...first, attempts };
+}
+
+async function _mhStartTranscriptJob(msg) {
+  if (_mhTrBusy) return { ok: false, error: 'transcript job already running' };
+  const recordings = (msg.recordings || []).filter(r => r && r.url);
+  if (!recordings.length) return { ok: false, error: 'no recordings with URLs' };
+  _mhTrBusy = true;
+  _mhTrCancelRequested = false;
+  const startedAt = Date.now();
+  const concurrency = Math.max(1, Math.min(+(msg.concurrency || 3), recordings.length));
+  const fmt = msg.format || 'txt';
+  _mhTrBatch = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, total: recordings.length, completed: 0, failed: 0, success: 0, startedAt, recordings, sourceUrl: msg.sourceUrl || '', courseName: msg.courseName || '' };
+  _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'starting', batchId: _mhTrBatch.id, total: recordings.length, completed: 0, failed: 0, success: 0, remaining: recordings.length, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+
+  (async () => {
+    const results = new Array(recordings.length);
+    let nextIdx = 0;
+    async function worker(workerId) {
+      while (!_mhTrCancelRequested) {
+        const i = nextIdx++;
+        if (i >= recordings.length) return;
+        const rec = recordings[i];
+        await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'running', batchId: _mhTrBatch.id, currentIndex: i + 1, total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: recordings.length - _mhTrBatch.completed - _mhTrBatch.failed, filename: rec.topic || rec.url, concurrency, workerId, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+        let res;
+        try { res = await _mhTrExtractWithRetry(rec); }
+        catch (e) { res = { recording: rec, error: String(e), attempts: [] }; }
+        results[i] = res;
+        if (res.vtt) _mhTrBatch.success++; else _mhTrBatch.failed++;
+        _mhTrBatch.completed++;
+        await _mhSetTrStatus({ kind: 'zoom-transcripts', state: res.vtt ? 'item-done' : 'item-error', batchId: _mhTrBatch.id, currentIndex: i + 1, total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: recordings.length - _mhTrBatch.completed, filename: rec.topic || rec.url, error: res.error || '', concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+      }
+    }
+    let zipName = '';
+    let zipSize = 0;
+    try {
+      await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i + 1)));
+      const files = [];
+      files.push({ path: 'הקלטות.txt', blob: _mhTrTextBlob('﻿' + _mhTrRecordingsText({ recordings, sourceUrl: msg.sourceUrl || '' })) });
+      const summary = [];
+      summary.push('Moodle Hoarder — Zoom Transcripts');
+      summary.push('===================================');
+      summary.push(`Captured at: ${new Date().toISOString()}`);
+      summary.push(`Total recordings: ${recordings.length}`);
+      summary.push(`With transcript: ${results.filter(t => t?.vtt).length}`);
+      summary.push(`Failed: ${results.filter(t => !t?.vtt).length}`);
+      summary.push(`Concurrency: ${concurrency}`);
+      summary.push(`Format: ${fmt}`);
+      summary.push('');
+      for (const tres of results) {
+        const baseName = _mhTrTranscriptFileStem(tres.recording || {});
+        if (tres.vtt) {
+          if (fmt !== 'txt') files.push({ path: `${baseName}.vtt`, blob: _mhTrTextBlob(tres.vtt, 'text/vtt;charset=utf-8') });
+          if (fmt !== 'vtt') files.push({ path: `${baseName}.txt`, blob: _mhTrTextBlob('﻿' + tres.txt) });
+          summary.push(`✓ ${baseName}  (VTT ${tres.vtt.length}B, TXT ${tres.txt.length}B)`);
+        } else {
+          summary.push(`✗ ${baseName}  — ${tres.error || 'unknown'}`);
+        }
+      }
+      const okT = results.filter(t => t?.vtt).length;
+      const transcriptDebug = { schema: 'moodle-hoarder.zoom-transcripts-debug.v1', capturedAt: new Date().toISOString(), sourceUrl: msg.sourceUrl || '', transcriptCount: recordings.length, successCount: okT, failedCount: recordings.length - okT, concurrency, format: fmt, results: results.map(t => ({ recording: t.recording, ok: !!t.vtt, vttUrl: t.vttUrl || '', vttBytes: t.vtt ? t.vtt.length : 0, txtBytes: t.txt ? t.txt.length : 0, error: t.error || '', skipReason: t.skipReason || '', attempts: t.attempts || [], debug: t.debug || null })) };
+      files.push({ path: '_status.txt', blob: _mhTrTextBlob('﻿' + summary.join('\r\n')) });
+      files.push({ path: '_debug.json', blob: new Blob([JSON.stringify(transcriptDebug, null, 2)], { type: 'application/json;charset=utf-8' }) });
+      const zipBlob = await buildZip(files);
+      zipSize = zipBlob.size;
+      const url = URL.createObjectURL(zipBlob);
+      const date = new Date().toISOString().slice(0, 10);
+      zipName = _mhTrZipFilename(recordings, date);
+      await chrome.downloads.download({ url, filename: zipName, saveAs: !!msg.saveAs });
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} }, 60_000);
+      const status = okT === recordings.length ? 'success' : (okT ? 'partial' : 'failed');
+      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'complete', batchId: _mhTrBatch.id, status, total: recordings.length, completed: recordings.length, failed: recordings.length - okT, success: okT, remaining: 0, filename: zipName, bytes: zipSize, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+      await _mhAppendHistory({ type: 'zoom-links', title: _mhTrHistoryTitle(recordings), sourceUrl: msg.sourceUrl || '', startedAt, finishedAt: Date.now(), status, itemCount: recordings.length, successCount: okT, failedCount: recordings.length - okT, bytes: zipSize, filename: zipName });
+      _mhNotify(`Zoom תמלילים: חולצו ${okT}/${recordings.length}. ${zipName}`, 'Moodle Hoarder — Zoom');
+    } catch (e) {
+      await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'error', batchId: _mhTrBatch.id, error: String(e), total: recordings.length, completed: _mhTrBatch.completed, failed: _mhTrBatch.failed, success: _mhTrBatch.success, remaining: Math.max(0, recordings.length - _mhTrBatch.completed), concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
+      _mhNotify('שגיאה בחילוץ תמלילים: ' + String(e), 'Moodle Hoarder — Zoom');
+    } finally {
+      _mhTrBusy = false;
+      _mhTrCancelRequested = false;
+    }
+  })();
+  return { ok: true, started: true, total: recordings.length, concurrency };
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'mh-cancel-transcripts') {
+    _mhTrCancelRequested = true;
+    sendResponse?.({ ok: true });
+    return true;
+  }
+  if (msg?.type === 'mh-tr-status-query') {
+    sendResponse?.({ busy: _mhTrBusy, batch: _mhTrBatch });
+    return true;
+  }
+  if (msg?.type === 'mh-extract-transcripts') {
+    _mhStartTranscriptJob(msg).then(sendResponse).catch(e => sendResponse?.({ ok: false, error: String(e) }));
+    return true;
+  }
 });
 
 function resolveMoodleUrl(url) {
