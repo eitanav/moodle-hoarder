@@ -71,7 +71,10 @@ def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> Non
         requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
         raise RuntimeError(
             "PyAV/faster-whisper audio decoder is not initialized correctly. "
-            "Close the transcriber and run transcriber\\run_gui_windows.bat so dependencies can update. "
+            f"Underlying error: {type(exc).__name__}: {exc}. "
+            "If the underlying error mentions site/addpackage/.pth/distutils or UnicodeDecodeError, "
+            "the local .venv is corrupted — delete transcriber\\.venv and re-run setup_windows.bat. "
+            "Otherwise close the transcriber and run transcriber\\run_gui_windows.bat so dependencies can update. "
             f"Manual fix: {sys.executable} -m pip install --upgrade --force-reinstall -r {requirements_path}"
         ) from exc
     if progress:
