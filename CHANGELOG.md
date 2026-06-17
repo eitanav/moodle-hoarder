@@ -4,6 +4,16 @@
 
 ---
 
+## v2.5.3 — פילוח סיבות כישלון בחילוץ תמלילי Zoom (Live)
+
+**הבעיה:** כשתמלילי Zoom נכשלו (במיוחד מקרה שכל ההקלטות נכשלו) הפופאפ הציג רק `X נכשלו` בלי לרמוז למה. הסיבה לכל פריט (`skipReason`/`error`) נכתבה רק לתוך `_debug.json` שבתוך ה-ZIP — שגם נוצר רק *אחרי* הריצה. כדי לדעת למה זה נכשל, היה צריך לפתוח את ה-ZIP ולקרוא JSON.
+
+- **`background.js` — מונה סיבות כישלון בזמן ריצה** — חדש: `_mhTrFailureKey()` ממפה כל כישלון ל-bucket יציב (`no-transcript`/`timeout`/`auth`/`tab-error`/`cancelled`/`other`). `_mhTrBatch` סופר אותם ב-`failureReasons` ומשדר אותם בכל עדכון סטטוס (`item-error`/`complete`/`error`)
+- **`popup.js` — פילוח חי בשורת הסטטוס** — `renderZoomTranscriptStatus()` מציג כעת למשל `4 נכשלו (4 ללא תמלול ב-Zoom)` במקום סתם `4 נכשלו`, וב-summary בסוף: `הסתיים חלקית: חולצו 1/11 (10 ללא תמלול ב-Zoom)` — המשתמש רואה מיד שזה לא באג שלנו אלא שלמרצה לא הופעלו auto-captions
+- מיפוי תוויות עברית עקבי (`TR_REASON_LABEL`) ב-popup.js, ו-helper `formatTranscriptFailureBreakdown()` שממיין מהשכיח לנדיר
+
+---
+
 ## v2.5.2 — חשיפת השגיאה האמיתית ב-Transcriber + תיקון venv פגום
 
 **הבעיה:** משתמש קיבל דיאלוג `PyAV/faster-whisper audio decoder is not initialized correctly` בלי שום רמז לסיבה — כי עטפנו *כל* חריגה בהודעת "תתקין מחדש" גנרית והסתרנו את השגיאה האמיתית. ה-traceback האמיתי הראה שזו בכלל לא בעיית PyAV אלא `.venv` פגום: קובץ `distutils-precedence.pth` נכשל ב-`site.addpackage` בכל הרצה של python (AttributeError/UnicodeDecodeError, נפוץ ב-Windows עם locale עברי).
