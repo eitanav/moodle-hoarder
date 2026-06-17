@@ -140,7 +140,13 @@ class TranscriberApp:
 
     def _diagnose_gpu(self) -> None:
         self._append_log("CUDA/GPU diagnostics:")
-        for line in collect_cuda_diagnostics():
+        try:
+            lines = collect_cuda_diagnostics()
+        except Exception as exc:  # noqa: BLE001 - surface diagnostic crashes instead of an unhandled console traceback
+            self._append_log(f"  Diagnostics failed: {exc}")
+            messagebox.showerror("שגיאה", f"בדיקת GPU נכשלה: {exc}")
+            return
+        for line in lines:
             self._append_log("  " + line)
 
     def _current_settings(self) -> dict[str, str]:
