@@ -4,6 +4,16 @@
 
 ---
 
+## v2.5.8 — התיקון השלם ל-cuBLAS: pre-load DLLs + שתי חבילות pip חסרות
+
+**הבעיה:** גם אחרי v2.5.7 (`os.add_dll_directory()`) ולאחר שהמשתמש התקין `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` בעצמו, אותה שגיאה בדיוק חזרה: `Library cublas64_12.dll is not found or cannot be loaded`. אבחון מעמיק (כולל `ctypes.WinDLL()` בבדידות, שבדק כל DLL נדרש בנפרד) חשף שתי בעיות מצטברות: (1) `nvidia-cuda-runtime-cu12` (מספקת `cudart64_12.dll`) ו-`nvidia-nvjitlink-cu12` (מספקת `nvJitLink_120_0.dll`) — שתי תלויות-טרנזיטיביות של `cublas64_12.dll` — לא הותקנו כלל, וחוסרן גרם ל-Windows לדווח על השגיאה הזו על ה-DLL ההורה (`cublas64_12.dll`) ולא על מה שבאמת חסר; (2) גם לאחר שכל ה-DLLs היו נוכחים, `os.add_dll_directory()` עדיין לא הספיק — ה-loader הפנימי של CTranslate2 ב-Windows קורא ל-`LoadLibraryA` בלי `LOAD_LIBRARY_SEARCH_USER_DIRS`, ולכן לא מתייעץ עם תיקיות שנרשמו דרך `AddDllDirectory`. הפתרון שעבד בפועל: גם לטעון מראש (pre-load) כל DLL בתיקיות האלה דרך `ctypes.WinDLL()` (שכן מתחשב בתיקיות שנוספו) — כך ש-Windows מחזיר handle כבר-טעון כש-CTranslate2 מבקש את אותו שם בסיס מאוחר יותר. אומת end-to-end: תמלול עברי תקין בפועל על Device=cuda, עם 98% ניצולת GPU ב-Task Manager.
+
+- **`mh_transcriber/engine.py`** — `_add_nvidia_pip_dll_directories()` כעת גם עוברת על כל ה-DLLs בתיקיות שאותרו וטוענת אותן מראש דרך `ctypes.WinDLL()`, בנוסף ל-`os.add_dll_directory()` הקיים; ה-docstring מעודכן להסביר את שתי הבעיות
+- `_explain_cuda_library_error()` — ההודעה מתעדכנת לכלול גם `nvjitlink`/`cudart` ולהמליץ על התקנת `nvidia-cuda-runtime-cu12 nvidia-nvjitlink-cu12 nvidia-cuda-nvrtc-cu12` בנוסף ל-cuBLAS/cuDNN
+- **`transcriber/requirements.txt`** — נוספו `nvidia-cuda-runtime-cu12`, `nvidia-nvjitlink-cu12`, `nvidia-cuda-nvrtc-cu12`, `nvidia-cublas-cu12`, `nvidia-cudnn-cu12` (כל החבילות ל-Windows בלבד, דרך `sys_platform == "win32"`), כך ש-`setup_windows.bat` מתקין מההתחלה את כל מה ש-CTranslate2 צריך בלי תיקון ידני
+
+---
+
 ## v2.5.7 — תיקון אמיתי לטעינת cuBLAS/cuDNN: חשיפת DLL folders ל-Windows
 
 **הבעיה:** משתמש התקין בהצלחה `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (לפי הנחיית v2.5.6) ועדיין קיבל את אותה שגיאה בדיוק: `Library cublas64_12.dll is not found or cannot be loaded`. הסיבה: ההתקנה עצמה לא מספיקה. חבילות ה-pip האלה שמות את ה-DLLs בתוך `site-packages\nvidia\cublas\bin` וכו', אבל "safe DLL search mode" של Windows (החל מ-Python 3.8) מתעלם מ-PATH לטעינת DLL על-ידי extension modules כמו CTranslate2 — כך שהקובץ יושב בדיסק אבל Windows פשוט לא מסתכל בתיקייה הזו. זה בדיוק הדפוס שגם PyTorch פותר ידנית באותה צורה בקוד שלו.
