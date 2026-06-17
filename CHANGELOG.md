@@ -4,6 +4,16 @@
 
 ---
 
+## v2.5.7 — תיקון אמיתי לטעינת cuBLAS/cuDNN: חשיפת DLL folders ל-Windows
+
+**הבעיה:** משתמש התקין בהצלחה `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (לפי הנחיית v2.5.6) ועדיין קיבל את אותה שגיאה בדיוק: `Library cublas64_12.dll is not found or cannot be loaded`. הסיבה: ההתקנה עצמה לא מספיקה. חבילות ה-pip האלה שמות את ה-DLLs בתוך `site-packages\nvidia\cublas\bin` וכו', אבל "safe DLL search mode" של Windows (החל מ-Python 3.8) מתעלם מ-PATH לטעינת DLL על-ידי extension modules כמו CTranslate2 — כך שהקובץ יושב בדיסק אבל Windows פשוט לא מסתכל בתיקייה הזו. זה בדיוק הדפוס שגם PyTorch פותר ידנית באותה צורה בקוד שלו.
+
+- **`mh_transcriber/engine.py`** — חדש: `_add_nvidia_pip_dll_directories()` מאתרת את כל תתי-החבילות המותקנות תחת ה-namespace package `nvidia` (cublas, cudnn, cuda_nvrtc וכו'), ועבור כל אחת קוראת ל-`os.add_dll_directory()` על תיקיית ה-`bin` שלה — לפני שהמודל נטען, כשDevice הוא `cuda`/`auto`. הפעולה רצה כל הרצה, רק על Windows, ולא משפיעה כש-`nvidia` לא מותקן
+- `_explain_cuda_library_error()` עודכן: ההודעה מציינת כעת שהכלי כבר ניסה לחשוף את ה-DLLs אוטומטית, ומוסיפה גם `nvidia-cuda-runtime-cu12` כפתרון נוסף אם זה עדיין לא מספיק; גם מתאים ל-`cudart` (לא רק `cublas`/`cudnn`)
+- **`transcriber/README.md`** — תיעוד מעודכן: ההתקנה דרך pip לא מספיקה בלי ה-DLL directory fix; גם נוספה הערה שכישלון SSL (`DECRYPTION_FAILED_OR_BAD_RECORD_MAC`) באמצע ההורדה הכבדה (מעל 1GB) הוא תקלת רשת חולפת — להריץ את אותה פקודת pip שוב
+
+---
+
 ## v2.5.6 — הודעת שגיאה ברורה ל-cuBLAS חסר + תיקון קריסת UnicodeDecodeError בבדיקת GPU
 
 **הבעיה:** משתמש שלח צילום מסך עם שתי תקלות במכשיר ה-Transcriber: (1) חלון שגיאה "`Library cublas64_12.dll is not found or cannot be loaded`" באמצע תמלול עם Device=cuda — קובץ ה-DLL של זמן-הריצה של CUDA (cuBLAS) חסר במחשב, גם אם דרייבר ה-GPU תקין; (2) במקביל, חלון קונסול ברקע הציג traceback לא מטופל שמסתיים ב-`UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d` שמקורו ב-thread הפנימי של `subprocess` (`_readerthread`).
