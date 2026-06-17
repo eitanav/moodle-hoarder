@@ -92,6 +92,18 @@ python transcribe.py --diagnose-gpu
 python -m pip install --upgrade --force-reinstall -r requirements.txt
 ```
 
+### שגיאת `PyAV/faster-whisper audio decoder is not initialized correctly`
+
+ההודעה הזאת מציגה כעת גם את השגיאה האמיתית שמתחת (`Underlying error: ...`). אם השגיאה האמיתית מזכירה `site` / `addpackage` / `.pth` / `distutils-precedence` / `_distutils_hack` או `UnicodeDecodeError` — הבעיה היא לא PyAV אלא ש-`.venv` עצמו פגום (קובץ `.pth` נכשל בכל הרצה של python, נפוץ ב-Windows עם locale עברי). הפתרון הוא למחוק ולבנות מחדש:
+
+```powershell
+cd transcriber
+rmdir /s /q .venv
+setup_windows.bat
+```
+
+`setup_windows.bat` משדרג כעת גם את `setuptools`/`wheel`, מה שמונע את התקלה הזאת מלכתחילה.
+
 ## דוח דיבאג
 
 אם משהו נתקע או נופל, לחץ ב-GUI על `שמור דוח דיבאג`. הקובץ הוא JSON וכולל גרסאות Python/packages, בדיקות CUDA/NVIDIA, בדיקות PyAV/ffmpeg, פרטי קובץ ההקלטה, הגדרות הריצה והלוג האחרון. במקרה של שגיאה בזמן תמלול, הכלי מנסה לשמור דוח דיבאג אוטומטית בתיקיית הפלט.

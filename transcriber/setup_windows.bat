@@ -11,7 +11,10 @@ if errorlevel 1 (
 py -3 -m venv .venv
 if errorlevel 1 goto :err
 call .venv\Scripts\activate.bat
-python -m pip install --upgrade pip
+rem Upgrade packaging tools too: a stale setuptools/_distutils_hack leaves a
+rem broken distutils-precedence.pth that crashes every python call at startup
+rem (site addpackage AttributeError / UnicodeDecodeError on non-UTF-8 locales).
+python -m pip install --upgrade pip setuptools wheel
 if errorlevel 1 goto :err
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :err
