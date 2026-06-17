@@ -64,7 +64,15 @@ def get_nvidia_smi_snapshot(timeout_seconds: float = 4.0) -> list[NvidiaSmiSnaps
         "--format=csv,noheader,nounits",
     ]
     try:
-        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
     if result.returncode != 0:

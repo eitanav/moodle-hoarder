@@ -108,6 +108,19 @@ setup_windows.bat
 
 זו שגיאת pip, לא שגיאת PyAV: כש-`run_gui_windows.bat` מתקן תלויות הוא מריץ `pip install --force-reinstall`, וזה דורש מ-pip להסיר קודם את הגרסה הקיימת. אם `av` (או חבילה אחרת) הותקנה בעבר באופן לא תקני וחסר לה קובץ `RECORD`, pip לא יכול להסיר אותה בבטחה והתהליך נכשל. הסקריפט מתקן זאת אוטומטית כעת — אם `--force-reinstall` נכשל, הוא מנסה שוב עם `--ignore-installed` (שמדלג על שלב ההסרה ופשוט כותב מעל הקבצים הקיימים). אם זה עדיין נכשל, הפתרון הנקי ביותר הוא למחוק את `.venv` ולהריץ `setup_windows.bat` מאפס (ראו למעלה).
 
+### שגיאת `Library cublas64_12.dll is not found or cannot be loaded`
+
+זו לא שגיאה בקוד אלא חוסר ב-CUDA runtime: יש דרייבר NVIDIA תקין, אבל קבצי ה-DLL של `cuBLAS`/`cuDNN` שצריך עבור Device=`cuda` חסרים או לא נגישים ב-PATH. הגרסה הנוכחית מציגה הודעת שגיאה עם שלושה פתרונות, לפי סדר:
+
+1. להתקין את ה-DLLs דרך pip (לא דורש התקנת CUDA Toolkit מלא):
+   ```powershell
+   cd transcriber
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+   ```
+2. לעבור ל-`Device=cpu` ב-GUI — איטי יותר אבל עובד בלי שום runtime של GPU.
+3. לעדכן את דרייבר ה-GPU מאתר NVIDIA.
+
 ## דוח דיבאג
 
 אם משהו נתקע או נופל, לחץ ב-GUI על `שמור דוח דיבאג`. הקובץ הוא JSON וכולל גרסאות Python/packages, בדיקות CUDA/NVIDIA, בדיקות PyAV/ffmpeg, פרטי קובץ ההקלטה, הגדרות הריצה והלוג האחרון. במקרה של שגיאה בזמן תמלול, הכלי מנסה לשמור דוח דיבאג אוטומטית בתיקיית הפלט.
