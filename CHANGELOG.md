@@ -4,6 +4,17 @@
 
 ---
 
+## v2.5.6 — הודעת שגיאה ברורה ל-cuBLAS חסר + תיקון קריסת UnicodeDecodeError בבדיקת GPU
+
+**הבעיה:** משתמש שלח צילום מסך עם שתי תקלות במכשיר ה-Transcriber: (1) חלון שגיאה "`Library cublas64_12.dll is not found or cannot be loaded`" באמצע תמלול עם Device=cuda — קובץ ה-DLL של זמן-הריצה של CUDA (cuBLAS) חסר במחשב, גם אם דרייבר ה-GPU תקין; (2) במקביל, חלון קונסול ברקע הציג traceback לא מטופל שמסתיים ב-`UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d` שמקורו ב-thread הפנימי של `subprocess` (`_readerthread`).
+
+- **`mh_transcriber/engine.py`** — חדש: `_explain_cuda_library_error()` מתרגם חריגה שמכילה `cublas`/`cudnn` בהודעה להודעת שגיאה ברורה עם 3 פתרונות מסודרים: התקנת `nvidia-cublas-cu12 nvidia-cudnn-cu12`, מעבר ל-Device=cpu, או עדכון דרייבר ה-GPU. עוטף את טעינת המודל ואת לולאת ה-decode של ה-segments (`for segment in segments_iter`) — שניהם המקומות שבהם CTranslate2 בפועל טוען את ה-DLL באופן lazy
+- **`mh_transcriber/diagnostics.py`** — `get_nvidia_smi_snapshot()`: הוספת `encoding="utf-8", errors="replace"` ל-`subprocess.run()` כך שפלט לא-UTF-8 מ-`nvidia-smi` לא מקריס את הבדיקה עם `UnicodeDecodeError`
+- **`mh_transcriber/debug_report.py`** — אותו תיקון ב-`_run_command()` (משמש את `git`, `nvidia-smi`, ובדיקת ffmpeg media-probe על שם קובץ עם תווים בעברית)
+- **`mh_transcriber/gui.py`** — כפתור "בדוק GPU" (`_diagnose_gpu`) עטוף כעת ב-try/except, כך שקריסה בבדיקה מציגה הודעת שגיאה ב-GUI במקום traceback לא מטופל בקונסול ברקע
+
+---
+
 ## v2.5.5 — תיקון `pip --force-reinstall` שנכשל כש-`av` חסר RECORD
 
 **הבעיה:** משתמש דיווח ש-`run_gui_windows.bat` נכשל באמצע תיקון תלויות עם `× Cannot uninstall av None` / `no RECORD file was found for av`. זו לא שגיאת PyAV — `pip install --force-reinstall` מנסה להסיר קודם כל חבילה קיימת לפני התקנה מחדש, ואם `av` הותקנה בעבר באופן לא תקני (למשל wheel/מצב התקנה שלא כתב metadata תקין) אין לה קובץ `RECORD`, ו-pip מסרב להסיר אותה — מה שמפיל את כל שלב התיקון ומונע מהתוכנה לעלות כליל.

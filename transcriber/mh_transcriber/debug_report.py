@@ -49,7 +49,15 @@ def _safe_text(value: Any) -> str:
 
 def _run_command(command: Sequence[str], timeout_seconds: float = 12.0) -> dict[str, Any]:
     try:
-        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
     except FileNotFoundError:
         return {"available": False, "error": "command not found", "command": list(command)}
     except subprocess.TimeoutExpired as exc:

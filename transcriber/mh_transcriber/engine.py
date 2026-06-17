@@ -81,6 +81,31 @@ def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> Non
         progress("PyAV audio decoder initialized.")
 
 
+def _explain_cuda_library_error(exc: Exception) -> RuntimeError | None:
+    """Translate a missing CUDA runtime library error into actionable guidance.
+
+    CTranslate2 loads cuBLAS/cuDNN lazily, so a GPU driver can be present and
+    healthy while the matching CUDA runtime DLLs (e.g. cublas64_12.dll) are
+    simply missing from PATH. That surfaces as a raw "Library ... is not found
+    or cannot be loaded" error with no hint of the fix, often only once the
+    first segment is actually decoded.
+    """
+
+    lowered = str(exc).lower()
+    if "cublas" not in lowered and "cudnn" not in lowered:
+        return None
+    return RuntimeError(
+        "CUDA runtime library failed to load "
+        f"({type(exc).__name__}: {exc}). "
+        "Your NVIDIA GPU driver is present, but the matching CUDA runtime libraries "
+        "(cuBLAS/cuDNN) are missing or not on PATH. Fix options: "
+        "1) From transcriber\\.venv run: "
+        "python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 ; "
+        "2) Or switch Device to cpu in the GUI (slower, no GPU runtime needed); "
+        "3) Make sure your NVIDIA GPU driver is up to date."
+    )
+
+
 def _load_whisper_model_with_heartbeat(
     *,
     model_cls: object,
@@ -178,13 +203,19 @@ def transcribe_file(
 
         from faster_whisper import WhisperModel
 
-        model = _load_whisper_model_with_heartbeat(
-            model_cls=WhisperModel,
-            model_name=str(model_path),
-            device=device,
-            compute_type=resolved_compute,
-            progress=progress,
-        )
+        try:
+            model = _load_whisper_model_with_heartbeat(
+                model_cls=WhisperModel,
+                model_name=str(model_path),
+                device=device,
+                compute_type=resolved_compute,
+                progress=progress,
+            )
+        except Exception as exc:  # noqa: BLE001 - translate known CUDA library failures
+            translated = _explain_cuda_library_error(exc)
+            if translated:
+                raise translated from exc
+            raise
 
         if device in {"cuda", "auto"}:
             log_cuda_diagnostics(progress)
@@ -209,11 +240,17 @@ def transcribe_file(
 
         # Materialize the generator so we can write all output formats.
         segments = []
-        for segment in segments_iter:
-            segments.append(segment)
-            if progress:
-                percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
-                progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {str(segment.text or '').strip()[:80]}")
+        try:
+            for segment in segments_iter:
+                segments.append(segment)
+                if progress:
+                    percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
+                    progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {str(segment.text or '').strip()[:80]}")
+        except Exception as exc:  # noqa: BLE001 - translate known CUDA library failures
+            translated = _explain_cuda_library_error(exc)
+            if translated:
+                raise translated from exc
+            raise
 
     if progress:
         progress("Writing transcript files...")
