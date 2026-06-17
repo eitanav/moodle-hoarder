@@ -110,7 +110,7 @@ setup_windows.bat
 
 ### שגיאת `Library cublas64_12.dll is not found or cannot be loaded`
 
-זו לא שגיאה בקוד אלא חוסר ב-CUDA runtime: יש דרייבר NVIDIA תקין, אבל קבצי ה-DLL של `cuBLAS`/`cuDNN` שצריך עבור Device=`cuda` חסרים או לא נגישים ב-PATH. הגרסה הנוכחית מציגה הודעת שגיאה עם שלושה פתרונות, לפי סדר:
+זו לא שגיאה בקוד אלא חוסר ב-CUDA runtime: יש דרייבר NVIDIA תקין, אבל קבצי ה-DLL של `cuBLAS`/`cuDNN` שצריך עבור Device=`cuda` חסרים או לא נגישים.
 
 1. להתקין את ה-DLLs דרך pip (לא דורש התקנת CUDA Toolkit מלא):
    ```powershell
@@ -118,8 +118,10 @@ setup_windows.bat
    .\.venv\Scripts\Activate.ps1
    python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
    ```
-2. לעבור ל-`Device=cpu` ב-GUI — איטי יותר אבל עובד בלי שום runtime של GPU.
-3. לעדכן את דרייבר ה-GPU מאתר NVIDIA.
+   החלק הזה לוקח כמה דקות ומוריד מעל 1GB — אם ה-pip נכשל באמצע עם שגיאת SSL (`DECRYPTION_FAILED_OR_BAD_RECORD_MAC` או דומה), זו הפרעת רשת (אנטי-וירוס/VPN עם SSL inspection, או חיבור לא יציב) ולא תקלה אמיתית — פשוט להריץ את אותה פקודה שוב; pip ימשיך מאיפה שנעצר.
+2. **חשוב:** התקנת ה-pip packages לבדה לא מספיקה. החל מהגרסה הנוכחית הכלי גם מנסה אוטומטית לחשוף את תיקיות ה-DLL האלה ל-Windows באמצעות `os.add_dll_directory()` — כי "safe DLL search mode" של Windows (החל מ-Python 3.8) מתעלם מ-PATH לטעינת DLL על-ידי extensions כמו CTranslate2, אז גם כש-`cublas64_12.dll` נמצא בפועל בתוך `site-packages\nvidia\cublas\bin`, CTranslate2 לא היה מוצא אותו בלי הקריאה הזו. אם השגיאה עדיין חוזרת אחרי התקנת ה-pip packages, ייתכן שצריך גם `nvidia-cuda-runtime-cu12`, או שההתקנה לא נכנסה ל-`.venv` הנכון.
+3. לעבור ל-`Device=cpu` ב-GUI — איטי יותר אבל עובד בלי שום runtime של GPU.
+4. לעדכן את דרייבר ה-GPU מאתר NVIDIA.
 
 ## דוח דיבאג
 
