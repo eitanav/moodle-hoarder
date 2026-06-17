@@ -35,6 +35,10 @@
 
 לרשימה מלאה: [FEATURES.md](FEATURES.md)
 
+## כלי תמלול מקומי ניסיוני
+
+נוסף MVP נפרד ב-[`transcriber/`](transcriber/) לתמלול הקלטות קורסים בעברית עם faster-whisper. הכלי כולל GUI קטן ו-CLI, תומך בבחירת מודל, ומייצא `txt`, `srt`, `vtt` ו-`json` עם timestamps.
+
 ## התקנה
 
 התוסף לא בחנות הרשמית של Chrome. ההתקנה ידנית (לוקחת 30 שניות):
