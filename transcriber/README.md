@@ -50,6 +50,20 @@ python run_gui.py
 
 > בפעם הראשונה המודל יורד מהאינטרנט. אחרי זה הוא נשמר ב-cache של Hugging Face/CTranslate2.
 
+### הורדת מודל מראש עם התקדמות
+
+אם התוכנה נראית תקועה על טעינת מודל, אפשר להוריד/לבדוק את המודל בנפרד לפני התמלול:
+
+- ב-GUI לחץ על `הורד מודל` אחרי בחירת המודל. זה לא מתמלל קובץ, רק מוריד או בודק את ה-cache ומדפיס התקדמות ללוג.
+- דרך CLI:
+
+```powershell
+python transcribe.py --download-model --model small
+python transcribe.py --download-model --model large-v3-turbo
+```
+
+ההורדה היא רק של קבצי המודל מ-Hugging Face. ההקלטות שלך לא נשלחות לענן. אחרי שהמודל מוכן, התמלול טוען אותו מתוך cache מקומי.
+
 ### איך יודעים שזה מתקדם?
 
 אם הלוג מראה `Loading model large-v3-turbo on cuda (float16)`, הכלי עדיין טוען/מוריד את המודל ומאתחל CUDA. בפעם הראשונה זה יכול לקחת כמה דקות בלי אחוזי התקדמות. אחרי שהמודל נטען תראה `Model loaded`.
@@ -67,6 +81,32 @@ python transcribe.py --diagnose-gpu
 ברירת המחדל מותאמת למחשב שלך: `Device=cuda`, `Compute=float16`, מודל `large-v3-turbo`, שפה `he`. אם זה עדיין לא מגיע ל-`Decoded`, לחץ `מצב בדיקה` כדי להריץ פעם אחת עם `model=base`; אם `base` עובד, הבעיה היא הורדה/טעינה של `large-v3-turbo` ולא כל הצינור.
 
 אם `tkinterdnd2` מותקן, אפשר לגרור קובץ לשדה. גם בלי drag-and-drop אפשר ללחוץ "בחר קובץ".
+
+
+### שגיאת `module av has no attribute audio`
+
+אם מופיעה שגיאה `module 'av' has no attribute 'audio'`, סגור את תוכנת התמלול והריץ שוב `run_gui_windows.bat`. הסקריפט יבדוק גם את תתי-המודולים של PyAV, והקוד מאתחל אותם לפני הקריאה ל-Whisper. אם זה עדיין קורה, הרץ ידנית מתוך `transcriber`:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade --force-reinstall -r requirements.txt
+```
+
+## דוח דיבאג
+
+אם משהו נתקע או נופל, לחץ ב-GUI על `שמור דוח דיבאג`. הקובץ הוא JSON וכולל גרסאות Python/packages, בדיקות CUDA/NVIDIA, בדיקות PyAV/ffmpeg, פרטי קובץ ההקלטה, הגדרות הריצה והלוג האחרון. במקרה של שגיאה בזמן תמלול, הכלי מנסה לשמור דוח דיבאג אוטומטית בתיקיית הפלט.
+
+אפשר גם ליצור דוח דרך CLI בלי להתחיל תמלול:
+
+```powershell
+python transcribe.py --debug-report debug.json
+```
+
+או עם קובץ הקלטה כדי לכלול probe של המדיה:
+
+```powershell
+python transcribe.py "C:\path\to\lecture.mp4" --debug-report debug.json --device cuda --compute-type float16 --model base
+```
 
 ## הרצת CLI
 

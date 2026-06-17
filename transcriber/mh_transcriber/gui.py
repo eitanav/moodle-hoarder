@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from .debug_report import write_debug_report
 from .diagnostics import collect_cuda_diagnostics
 from .engine import DEFAULT_MODEL, RECOMMENDED_MODELS, transcribe_file
+from .model_manager import download_model
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -100,6 +101,7 @@ class TranscriberApp:
         self.start_button = ttk.Button(action, text="התחל תמלול", command=self._start)
         self.start_button.pack(side="left")
         ttk.Button(action, text="בדוק GPU", command=self._diagnose_gpu).pack(side="left", padx=(8, 0))
+        ttk.Button(action, text="הורד מודל", command=self._download_selected_model).pack(side="left", padx=(8, 0))
         ttk.Button(action, text="מצב בדיקה", command=self._quick_test_settings).pack(side="left", padx=(8, 0))
         ttk.Button(action, text="שמור דוח דיבאג", command=self._save_debug_report).pack(side="left", padx=(8, 0))
         ttk.Label(action, textvariable=self.status).pack(side="left", padx=12)
@@ -189,6 +191,24 @@ class TranscriberApp:
         self._append_log(f"Debug report written: {written}")
         messagebox.showinfo("דוח דיבאג נשמר", str(written))
 
+
+    def _download_selected_model(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self.start_button.configure(state="disabled")
+        self.status.set("מוריד/בודק מודל...")
+        self.progress_bar.start(12)
+        self._append_log(f"Downloading/checking model only: {self.model.get()}")
+        self._worker = threading.Thread(target=self._run_model_download, daemon=True)
+        self._worker.start()
+
+    def _run_model_download(self) -> None:
+        try:
+            path = download_model(self.model.get(), progress=self._messages.put)
+            self._messages.put(f"MODEL_READY:{path}")
+        except Exception as exc:  # noqa: BLE001 - surface GUI errors to the user
+            self._messages.put("ERROR:" + str(exc))
+
     def _quick_test_settings(self) -> None:
         self.model.set("base")
         self.device.set("cuda")
@@ -236,7 +256,13 @@ class TranscriberApp:
                 message = self._messages.get_nowait()
             except queue.Empty:
                 break
-            if message.startswith("DONE:"):
+            if message.startswith("MODEL_READY:"):
+                self.progress_bar.stop()
+                self.start_button.configure(state="normal")
+                self.status.set("המודל מוכן")
+                self._append_log("Model ready: " + message[len("MODEL_READY:"):])
+                messagebox.showinfo("המודל מוכן", message[len("MODEL_READY:"):])
+            elif message.startswith("DONE:"):
                 self.progress_bar.stop()
                 self.start_button.configure(state="normal")
                 self.status.set("הסתיים")

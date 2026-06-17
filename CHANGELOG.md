@@ -4,6 +4,19 @@
 
 ---
 
+## v2.5.0 — הורדת מודל מפורשת + חוסן PyAV נוסף ב-Transcriber
+
+**הבעיה:** בריצה ראשונה, `faster-whisper` מוריד את המודל מ-Hugging Face בלי שום פס התקדמות גלוי — נראה כאילו התוכנה תקועה על "Loading model...". בנוסף, בנייה מסוימת של PyAV ב-Windows חושפת את `av.audio` אבל לא את `av.audio.resampler`, מה שעדיין הפיל את התיקון מ-v2.4.0.
+
+- **`model_manager.py` חדש** — `download_model()` מוריד/בודק את קובצי המודל מ-Hugging Face עם `huggingface-hub`+`tqdm`, מדפיס התקדמות (קבצים/אחוזים) וheartbeat כל 20 שניות, ומחזיר את נתיב ה-cache המקומי שמועבר ל-`WhisperModel` במקום שם המודל
+- **כפתור "הורד מודל" ב-GUI ודגל `--download-model` ב-CLI** — מאפשר להוריד/לוודא שהמודל קיים מראש, בלי להתחיל תמלול
+- **`_prime_pyav_audio_namespace()` עבר חוסן נוסף** — אם `av.audio` קיים אבל `av.audio.resampler`/`av.audio.frame` חסרים (כמו בחלק מבניות PyAV ב-Windows), הם מוצמדים במפורש ל-namespace לפני שמועלה שגיאה
+- **תיעוד חדש ב-`transcriber/README.md`** — הורדת מודל מראש, פתרון `module 'av' has no attribute 'audio'`, ותיעוד פיצ'ר דוח הדיבאג (`--debug-report`/כפתור GUI) שלא היה מתועד עד כה
+- **`huggingface-hub`+`tqdm`** נוספו ל-`transcriber/requirements.txt`; `run_gui_windows.bat` בודק גם אותם ומריץ את `_prime_pyav_audio_namespace()` כחלק מבדיקת התלויות
+- **בדיקות `test_model_manager.py`** — מיפוי שם מודל ל-repo ב-Hugging Face
+
+---
+
 ## v2.4.0 — תמלול Zoom רץ ב-Background + תיקון PyAV ב-Transcriber
 
 **הבעיה:** חילוץ תמלולי Zoom (VTT) רץ עד עכשיו בתוך הפופאפ עצמו — אם המשתמש סגר את הפופאפ (אפילו בטעות, או כי לחץ במקום אחר), כל התהליך נעצר באמצע ואיבד את כל ההתקדמות. בנוסף, ב-Transcriber היתה תקלה שגרמה לקריסה עם `module 'av' has no attribute 'audio'` בהפעלות מסוימות.

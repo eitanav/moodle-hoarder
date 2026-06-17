@@ -14,6 +14,7 @@ from typing import Literal
 from .audio import prepare_audio_for_transcription
 from .diagnostics import log_cuda_diagnostics
 from .formatters import write_outputs
+from .model_manager import download_model
 
 ComputeType = Literal["auto", "float16", "int8_float16", "int8", "float32"]
 Device = Literal["auto", "cuda", "cpu"]
@@ -53,11 +54,20 @@ def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> Non
 
         import av
 
-        importlib.import_module("av.audio")
-        importlib.import_module("av.audio.resampler")
-        importlib.import_module("av.audio.frame")
+        audio_module = importlib.import_module("av.audio")
+        resampler_module = importlib.import_module("av.audio.resampler")
+        frame_module = importlib.import_module("av.audio.frame")
+        # Some Windows/PyAV builds put the modules in sys.modules but do not
+        # attach them as attributes. faster-whisper accesses av.audio.resampler,
+        # so patch the namespace explicitly before decoding.
         if not hasattr(av, "audio"):
-            raise AttributeError("PyAV did not expose av.audio after importing audio submodules")
+            av.audio = audio_module  # type: ignore[attr-defined]
+        if not hasattr(av.audio, "resampler"):
+            av.audio.resampler = resampler_module  # type: ignore[attr-defined]
+        if not hasattr(av.audio, "frame"):
+            av.audio.frame = frame_module  # type: ignore[attr-defined]
+        if not hasattr(av.audio, "resampler"):
+            raise AttributeError("PyAV did not expose av.audio.resampler after importing audio submodules")
     except Exception as exc:  # noqa: BLE001 - provide actionable GUI error instead of raw AttributeError
         requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
         raise RuntimeError(
@@ -148,8 +158,11 @@ def transcribe_file(
             progress("Audio preprocessing is disabled; passing media directly to faster-whisper.")
 
         if progress:
-            progress(f"Loading model {model_name} on {device} ({resolved_compute})...")
-            progress("First run can take several minutes because the model may be downloading and initializing.")
+            progress(f"Checking/downloading model {model_name} before loading...")
+        model_path = download_model(model_name, progress=progress)
+
+        if progress:
+            progress(f"Loading model {model_name} on {device} ({resolved_compute}) from local cache...")
         if device in {"cuda", "auto"}:
             log_cuda_diagnostics(progress)
 
@@ -165,7 +178,7 @@ def transcribe_file(
 
         model = _load_whisper_model_with_heartbeat(
             model_cls=WhisperModel,
-            model_name=model_name,
+            model_name=str(model_path),
             device=device,
             compute_type=resolved_compute,
             progress=progress,
