@@ -1,5 +1,14 @@
 faster-whisper>=1.1.0
 imageio-ffmpeg>=0.5.1
+# CUDA runtime DLLs that cuBLAS/cuDNN depend on transitively (cudart, nvJitLink).
+# faster-whisper/CTranslate2 do not pull these in on their own; without them,
+# GPU transcription fails with "Library cublas64_12.dll is not found or cannot
+# be loaded" even though cublas64_12.dll itself is present.
+nvidia-cuda-runtime-cu12>=12.9.0; sys_platform == "win32"
+nvidia-nvjitlink-cu12>=12.9.0; sys_platform == "win32"
+nvidia-cuda-nvrtc-cu12>=12.9.0; sys_platform == "win32"
+nvidia-cublas-cu12>=12.9.0; sys_platform == "win32"
+nvidia-cudnn-cu12>=9.0.0; sys_platform == "win32"
 # Optional, enables drag-and-drop in the GUI when installed.
 tkinterdnd2>=0.4.2
 huggingface-hub>=0.23.0

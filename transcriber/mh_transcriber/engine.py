@@ -102,10 +102,11 @@ def _explain_cuda_library_error(exc: Exception) -> RuntimeError | None:
         "CUDA runtime library failed to load "
         f"({type(exc).__name__}: {exc}). "
         "Your NVIDIA GPU driver is present, but a CUDA runtime DLL "
-        "(cuBLAS/cuDNN/cudart) could not be loaded, even after this tool tried to expose "
-        "pip-installed NVIDIA DLL folders automatically. Fix options: "
+        "(cuBLAS/cuDNN/cudart/nvJitLink) could not be loaded, even after this tool tried to expose "
+        "and pre-load pip-installed NVIDIA DLLs automatically. Fix options: "
         "1) From transcriber\\.venv run: "
-        "python -m pip install --upgrade nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 ; "
+        "python -m pip install --upgrade nvidia-cublas-cu12 nvidia-cudnn-cu12 "
+        "nvidia-cuda-runtime-cu12 nvidia-nvjitlink-cu12 nvidia-cuda-nvrtc-cu12 ; "
         "2) Or switch Device to cpu in the GUI (slower, no GPU runtime needed); "
         "3) Make sure your NVIDIA GPU driver is up to date."
     )
@@ -120,8 +121,14 @@ def _add_nvidia_pip_dll_directories(progress: ProgressCallback | None = None) ->
     search mode" (the default since Python 3.8) ignores PATH when an
     extension module loads a DLL, so the file can sit right there in
     site-packages and CTranslate2 still raises "... is not found or cannot be
-    loaded". os.add_dll_directory() is the documented way to opt a folder
-    back into that search.
+    loaded". os.add_dll_directory() opts a folder back into that search, but
+    it is still not sufficient on its own: CTranslate2's internal Windows
+    loader calls LoadLibraryA without LOAD_LIBRARY_SEARCH_USER_DIRS, so it
+    never consults directories registered via AddDllDirectory. The reliable
+    fix is to also pre-load every DLL in those folders via ctypes.WinDLL()
+    (which does honor added directories) before CTranslate2 lazily dlopens
+    them by base name at first encode — Windows then returns the
+    already-loaded module handle instead of re-resolving the search path.
     """
 
     added: list[str] = []
@@ -131,6 +138,7 @@ def _add_nvidia_pip_dll_directories(progress: ProgressCallback | None = None) ->
         import nvidia  # type: ignore[import-not-found]
     except ImportError:
         return added
+    bin_dirs: list[Path] = []
     for nvidia_path in getattr(nvidia, "__path__", []):
         nvidia_dir = Path(nvidia_path)
         if not nvidia_dir.is_dir():
@@ -143,9 +151,24 @@ def _add_nvidia_pip_dll_directories(progress: ProgressCallback | None = None) ->
                 os.add_dll_directory(str(bin_dir))  # type: ignore[attr-defined]
             except (OSError, AttributeError):
                 continue
+            bin_dirs.append(bin_dir)
             added.append(str(bin_dir))
+
+    import ctypes
+
+    preloaded: list[str] = []
+    for bin_dir in bin_dirs:
+        for dll_path in bin_dir.glob("*.dll"):
+            try:
+                ctypes.WinDLL(str(dll_path))
+            except OSError:
+                continue
+            preloaded.append(dll_path.name)
+
     if progress and added:
         progress("Added NVIDIA CUDA runtime DLL directories: " + ", ".join(added))
+    if progress and preloaded:
+        progress(f"Pre-loaded {len(preloaded)} NVIDIA CUDA DLLs into the process.")
     return added
 
 
