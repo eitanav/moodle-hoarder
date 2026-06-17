@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mh_transcriber.debug_report import build_debug_report, write_debug_report
+from mh_transcriber.debug_report import _safe_text, build_debug_report, write_debug_report
 
 
 class DebugReportTests(unittest.TestCase):
@@ -30,6 +30,11 @@ class DebugReportTests(unittest.TestCase):
             self.assertEqual(written, path.resolve())
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(data["settings"]["device"], "cpu")
+
+    def test_safe_text_handles_none_bytes_and_strings(self):
+        self.assertEqual(_safe_text(None), "")
+        self.assertEqual(_safe_text(b" hello "), "hello")
+        self.assertEqual(_safe_text(" hello "), "hello")
 
 
 if __name__ == "__main__":

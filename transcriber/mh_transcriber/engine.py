@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import importlib
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -50,8 +51,6 @@ def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> Non
     if importlib.util.find_spec("av") is None:
         return
     try:
-        import importlib
-
         import av
 
         audio_module = importlib.import_module("av.audio")
@@ -211,7 +210,7 @@ def transcribe_file(
             segments.append(segment)
             if progress:
                 percent = f" ({min(100.0, (segment.end / duration) * 100):0.1f}%)" if duration else ""
-                progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {segment.text.strip()[:80]}")
+                progress(f"Decoded {segment.start:0.1f}s–{segment.end:0.1f}s{percent}: {str(segment.text or '').strip()[:80]}")
 
     if progress:
         progress("Writing transcript files...")

@@ -37,6 +37,16 @@ def _package_version(package: str) -> str:
         return "not installed"
 
 
+def _safe_text(value: Any) -> str:
+    """Convert subprocess output to a report-safe string."""
+
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace").strip()
+    return str(value).strip()
+
+
 def _run_command(command: Sequence[str], timeout_seconds: float = 12.0) -> dict[str, Any]:
     try:
         result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
@@ -47,15 +57,15 @@ def _run_command(command: Sequence[str], timeout_seconds: float = 12.0) -> dict[
             "available": True,
             "timed_out": True,
             "command": list(command),
-            "stdout": exc.stdout or "",
-            "stderr": exc.stderr or "",
+            "stdout": _safe_text(exc.stdout),
+            "stderr": _safe_text(exc.stderr),
         }
     return {
         "available": True,
         "returncode": result.returncode,
         "command": list(command),
-        "stdout": result.stdout.strip(),
-        "stderr": result.stderr.strip(),
+        "stdout": _safe_text(result.stdout),
+        "stderr": _safe_text(result.stderr),
     }
 
 
