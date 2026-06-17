@@ -436,6 +436,21 @@ async function _mhEnsureOffscreen() {
 }
 
 // Ask the offscreen doc to fetch the signed URL and hand back a blob: URL.
+
+async function _mhOffscreenBuildZip(files) {
+  await _mhEnsureOffscreen();
+  for (let i = 0; i < 3; i++) {
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'mh-offscreen-build-zip', files });
+      if (resp?.ok && resp.blobUrl) return resp;
+      if (resp?.error) return { error: resp.error };
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+  return { error: 'offscreen zip builder unreachable' };
+}
+
 async function _mhOffscreenFetch(url) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -937,7 +952,7 @@ async function _mhStartTranscriptJob(msg) {
     try {
       await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i + 1)));
       const files = [];
-      files.push({ path: 'הקלטות.txt', blob: _mhTrTextBlob('﻿' + _mhTrRecordingsText({ recordings, sourceUrl: msg.sourceUrl || '' })) });
+      files.push({ path: 'הקלטות.txt', text: '﻿' + _mhTrRecordingsText({ recordings, sourceUrl: msg.sourceUrl || '' }), type: 'text/plain;charset=utf-8' });
       const summary = [];
       summary.push('Moodle Hoarder — Zoom Transcripts');
       summary.push('===================================');
@@ -951,8 +966,8 @@ async function _mhStartTranscriptJob(msg) {
       for (const tres of results) {
         const baseName = _mhTrTranscriptFileStem(tres.recording || {});
         if (tres.vtt) {
-          if (fmt !== 'txt') files.push({ path: `${baseName}.vtt`, blob: _mhTrTextBlob(tres.vtt, 'text/vtt;charset=utf-8') });
-          if (fmt !== 'vtt') files.push({ path: `${baseName}.txt`, blob: _mhTrTextBlob('﻿' + tres.txt) });
+          if (fmt !== 'txt') files.push({ path: `${baseName}.vtt`, text: tres.vtt, type: 'text/vtt;charset=utf-8' });
+          if (fmt !== 'vtt') files.push({ path: `${baseName}.txt`, text: '﻿' + tres.txt, type: 'text/plain;charset=utf-8' });
           summary.push(`✓ ${baseName}  (VTT ${tres.vtt.length}B, TXT ${tres.txt.length}B)`);
         } else {
           summary.push(`✗ ${baseName}  — ${tres.error || 'unknown'}`);
@@ -960,15 +975,16 @@ async function _mhStartTranscriptJob(msg) {
       }
       const okT = results.filter(t => t?.vtt).length;
       const transcriptDebug = { schema: 'moodle-hoarder.zoom-transcripts-debug.v1', capturedAt: new Date().toISOString(), sourceUrl: msg.sourceUrl || '', transcriptCount: recordings.length, successCount: okT, failedCount: recordings.length - okT, concurrency, format: fmt, results: results.map(t => ({ recording: t.recording, ok: !!t.vtt, vttUrl: t.vttUrl || '', vttBytes: t.vtt ? t.vtt.length : 0, txtBytes: t.txt ? t.txt.length : 0, error: t.error || '', skipReason: t.skipReason || '', attempts: t.attempts || [], debug: t.debug || null })) };
-      files.push({ path: '_status.txt', blob: _mhTrTextBlob('﻿' + summary.join('\r\n')) });
-      files.push({ path: '_debug.json', blob: new Blob([JSON.stringify(transcriptDebug, null, 2)], { type: 'application/json;charset=utf-8' }) });
-      const zipBlob = await buildZip(files);
-      zipSize = zipBlob.size;
-      const url = URL.createObjectURL(zipBlob);
+      files.push({ path: '_status.txt', text: '﻿' + summary.join('\r\n'), type: 'text/plain;charset=utf-8' });
+      files.push({ path: '_debug.json', text: JSON.stringify(transcriptDebug, null, 2), type: 'application/json;charset=utf-8' });
+      const zipResp = await _mhOffscreenBuildZip(files);
+      if (!zipResp?.ok) throw new Error('offscreen zip failed: ' + (zipResp?.error || 'unknown'));
+      zipSize = zipResp.size || 0;
+      const url = zipResp.blobUrl;
       const date = new Date().toISOString().slice(0, 10);
       zipName = _mhTrZipFilename(recordings, date);
       await chrome.downloads.download({ url, filename: zipName, saveAs: !!msg.saveAs });
-      setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} }, 60_000);
+      setTimeout(() => { try { chrome.runtime.sendMessage({ type: 'mh-offscreen-revoke', blobUrl: url }); } catch {} }, 60_000);
       const status = okT === recordings.length ? 'success' : (okT ? 'partial' : 'failed');
       await _mhSetTrStatus({ kind: 'zoom-transcripts', state: 'complete', batchId: _mhTrBatch.id, status, total: recordings.length, completed: recordings.length, failed: recordings.length - okT, success: okT, remaining: 0, filename: zipName, bytes: zipSize, concurrency, courseName: _mhTrBatch.courseName, sourceUrl: _mhTrBatch.sourceUrl });
       await _mhAppendHistory({ type: 'zoom-links', title: _mhTrHistoryTitle(recordings), sourceUrl: msg.sourceUrl || '', startedAt, finishedAt: Date.now(), status, itemCount: recordings.length, successCount: okT, failedCount: recordings.length - okT, bytes: zipSize, filename: zipName });

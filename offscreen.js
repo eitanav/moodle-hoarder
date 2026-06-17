@@ -27,6 +27,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true; // async sendResponse
   }
+
+  // Service workers do not expose URL.createObjectURL. Build transcript ZIPs
+  // here (a real extension document), create a blob: URL, and let the worker
+  // save/revoke it after chrome.downloads has consumed it.
+  if (msg?.type === 'mh-offscreen-build-zip' && Array.isArray(msg.files)) {
+    (async () => {
+      try {
+        if (typeof buildZip !== 'function') throw new Error('buildZip is unavailable in offscreen document');
+        const files = msg.files.map((f) => ({
+          path: String(f.path || 'file.txt'),
+          blob: new Blob([String(f.text || '')], { type: f.type || 'text/plain;charset=utf-8' }),
+        }));
+        const blob = await buildZip(files);
+        const blobUrl = URL.createObjectURL(blob);
+        setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 30 * 60 * 1000);
+        sendResponse({ ok: true, blobUrl, size: blob.size, mime: blob.type });
+      } catch (e) {
+        sendResponse({ error: String((e && e.message) || e) });
+      }
+    })();
+    return true;
+  }
+
   if (msg?.type === 'mh-offscreen-revoke' && msg.blobUrl) {
     try { URL.revokeObjectURL(msg.blobUrl); } catch {}
   }
