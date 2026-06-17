@@ -104,6 +104,7 @@ const TR_REASON_LABEL = {
   'cancelled': 'בוטלו',
   'auth': 'דרושה התחברות',
   'tab-error': 'שגיאת טאב',
+  'navigated-away': 'הטאב נחת בדף אחר',
   'other': 'שגיאות אחרות',
 };
 

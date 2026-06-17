@@ -817,6 +817,7 @@ async function _mhTrExtractOne(rec, opts = {}) {
         window.__mhVttInstalled = true;
         window.__mhVtt = null;
         window.__mhVttSeen = [];
+        window.__mhInitialHref = location.href;
         const isVtt = (u) => /\/rec\/play\/vtt\b[^?]*\??[^#]*type=transcript/i.test(u || '');
         const remember = (url, source, status, body) => {
           try { window.__mhVttSeen.push({ url: String(url || ''), source, status: status || 0, bytes: body ? body.length : 0, at: Date.now() }); } catch {}
@@ -856,12 +857,26 @@ async function _mhTrExtractOne(rec, opts = {}) {
             if (isVtt(url)) fetchVtt(url, 'performance');
           }
         } catch {}
-        try {
-          for (const btn of document.querySelectorAll('button, [role="button"], [aria-label], [title]')) {
-            const txt = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
-            if (/transcript|caption|cc|תמל|כתוב/.test(txt) && btn.offsetParent !== null) { btn.click(); break; }
-          }
-        } catch {}
+        window.__mhVttClicked = false;
+        // Word-bounded match only: a bare /cc/ substring also matches "Accessibility"
+        // (a-CC-essibility), which made this click Zoom's "Accessibility" nav link
+        // instead of the transcript toggle and navigate the tab away entirely.
+        // "כתוב" (generic "write") was similarly too broad (matches "כתובת"/address).
+        const TRANSCRIPT_BTN_RE = /\btranscript\b|\bcaptions?\b|\bcc\b|תמלול|תמליל|כתוביות/i;
+        window.__mhClickTranscriptBtn = () => {
+          if (window.__mhVttClicked) return true;
+          try {
+            for (const btn of document.querySelectorAll('button, [role="button"], [aria-label], [title]')) {
+              // Never click links: the only safe targets are in-page player controls,
+              // and an <a> match can navigate the whole tab away from the recording.
+              if (btn.tagName === 'A') continue;
+              const txt = ((btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+              if (TRANSCRIPT_BTN_RE.test(txt) && btn.offsetParent !== null) { btn.click(); window.__mhVttClicked = true; return true; }
+            }
+          } catch {}
+          return false;
+        };
+        window.__mhClickTranscriptBtn();
       },
     });
     const start = Date.now();
@@ -874,21 +889,38 @@ async function _mhTrExtractOne(rec, opts = {}) {
       try {
         const [{ result }] = await chrome.scripting.executeScript({
           target: { tabId: tab.id }, world: 'MAIN',
-          func: () => ({
-            vtt: window.__mhVtt || null,
-            seen: window.__mhVttSeen || [],
-            uiHints: {
-              transcriptClass: !!document.querySelector('[class*="transcript" i]'),
-              transcriptDataAttr: !!document.querySelector('[data-test*="transcript" i], [data-testid*="transcript" i]'),
-              ccButton: !!document.querySelector('button[aria-label*="transcript" i], button[aria-label*="caption" i], button[aria-label*="CC" i]'),
-              captionsTrack: !!document.querySelector('track[kind="captions"], track[kind="subtitles"]'),
-            },
-          }),
+          func: () => {
+            // Retry the click on every poll: the one-shot attempt right after page
+            // load can miss a slow-rendering player, and that miss used to be
+            // permanent for the whole timeout window.
+            if (!window.__mhVtt && typeof window.__mhClickTranscriptBtn === 'function') window.__mhClickTranscriptBtn();
+            return {
+              vtt: window.__mhVtt || null,
+              seen: window.__mhVttSeen || [],
+              clicked: !!window.__mhVttClicked,
+              // Catches the next "clicked the wrong thing" bug fast: if a stray
+              // click ever navigates the tab away from the recording, this flips
+              // true instead of silently producing an unexplained timeout.
+              navigated: location.href !== window.__mhInitialHref,
+              href: location.href,
+              uiHints: {
+                transcriptClass: !!document.querySelector('[class*="transcript" i]'),
+                transcriptDataAttr: !!document.querySelector('[data-test*="transcript" i], [data-testid*="transcript" i]'),
+                // No bare aria-label*="CC" check here: that substring match also
+                // hits "Accessibility" and made this hint falsely true.
+                ccButton: !!document.querySelector('button[aria-label*="transcript" i], button[aria-label*="caption" i]'),
+                captionsTrack: !!document.querySelector('track[kind="captions"], track[kind="subtitles"]'),
+              },
+            };
+          },
         });
         snap = result;
-        if (snap && debug.snapshots.length < 8) debug.snapshots.push({ seenCount: (snap.seen || []).length, lastSeen: (snap.seen || []).slice(-2), uiHints: snap.uiHints || {} });
+        if (snap && debug.snapshots.length < 8) debug.snapshots.push({ seenCount: (snap.seen || []).length, lastSeen: (snap.seen || []).slice(-2), uiHints: snap.uiHints || {}, clicked: !!snap.clicked, navigated: !!snap.navigated, href: snap.href || '' });
       } catch (e) { debug.snapshots.push({ error: String(e) }); }
       if (snap?.vtt?.body) { payload = snap.vtt; break; }
+      if (snap?.navigated) {
+        return { recording: rec, error: `Tab navigated away from the recording (now at ${snap.href})`, skipReason: 'navigated-away', debug };
+      }
       if (!earlyChecked && Date.now() - start >= EARLY_BAIL_MS) {
         earlyChecked = true;
         const hints = snap?.uiHints || {};
@@ -908,7 +940,7 @@ async function _mhTrExtractWithRetry(rec) {
   const attempts = [];
   let first = await _mhTrExtractOne(rec, { attempt: 1 });
   attempts.push({ attempt: 1, ok: !!first.vtt, error: first.error || '', skipReason: first.skipReason || '', debug: first.debug || null });
-  if (!first.vtt && /timeout|no-transcript-ui|script|tab/i.test(first.skipReason || first.error || '')) {
+  if (!first.vtt && /timeout|no-transcript-ui|navigated-away|script|tab/i.test(first.skipReason || first.error || '')) {
     await new Promise(r => setTimeout(r, 1000));
     const second = await _mhTrExtractOne(rec, { attempt: 2, retry: true });
     attempts.push({ attempt: 2, ok: !!second.vtt, error: second.error || '', skipReason: second.skipReason || '', debug: second.debug || null });
@@ -925,6 +957,7 @@ function _mhTrFailureKey(res) {
   if (skip === 'no-transcript-ui') return 'no-transcript';
   if (skip === 'timeout') return 'timeout';
   if (skip === 'cancelled') return 'cancelled';
+  if (skip === 'navigated-away') return 'navigated-away';
   const err = String(res?.error || '').toLowerCase();
   if (/cancel/.test(err)) return 'cancelled';
   if (/timeout|no transcript ui|after \d+s without/.test(err)) return /no transcript/.test(err) ? 'no-transcript' : 'timeout';
