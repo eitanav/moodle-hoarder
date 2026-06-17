@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import importlib
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import sys
@@ -84,26 +85,68 @@ def _prime_pyav_audio_namespace(progress: ProgressCallback | None = None) -> Non
 def _explain_cuda_library_error(exc: Exception) -> RuntimeError | None:
     """Translate a missing CUDA runtime library error into actionable guidance.
 
-    CTranslate2 loads cuBLAS/cuDNN lazily, so a GPU driver can be present and
-    healthy while the matching CUDA runtime DLLs (e.g. cublas64_12.dll) are
-    simply missing from PATH. That surfaces as a raw "Library ... is not found
-    or cannot be loaded" error with no hint of the fix, often only once the
-    first segment is actually decoded.
+    CTranslate2 loads cuBLAS/cuDNN/cudart lazily, so a GPU driver can be
+    present and healthy while the matching CUDA runtime DLLs (e.g.
+    cublas64_12.dll) fail to load. That surfaces as a raw "Library ... is not
+    found or cannot be loaded" error with no hint of the fix, often only once
+    the first segment is actually decoded. _add_nvidia_pip_dll_directories()
+    already tries to fix this automatically by exposing pip-installed
+    nvidia-*-cu12 DLL folders to Windows; this only triggers when that was not
+    enough (package missing entirely, or a DLL outside cuBLAS/cuDNN/cudart).
     """
 
     lowered = str(exc).lower()
-    if "cublas" not in lowered and "cudnn" not in lowered:
+    if "cublas" not in lowered and "cudnn" not in lowered and "cudart" not in lowered:
         return None
     return RuntimeError(
         "CUDA runtime library failed to load "
         f"({type(exc).__name__}: {exc}). "
-        "Your NVIDIA GPU driver is present, but the matching CUDA runtime libraries "
-        "(cuBLAS/cuDNN) are missing or not on PATH. Fix options: "
+        "Your NVIDIA GPU driver is present, but a CUDA runtime DLL "
+        "(cuBLAS/cuDNN/cudart) could not be loaded, even after this tool tried to expose "
+        "pip-installed NVIDIA DLL folders automatically. Fix options: "
         "1) From transcriber\\.venv run: "
-        "python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 ; "
+        "python -m pip install --upgrade nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 ; "
         "2) Or switch Device to cpu in the GUI (slower, no GPU runtime needed); "
         "3) Make sure your NVIDIA GPU driver is up to date."
     )
+
+
+def _add_nvidia_pip_dll_directories(progress: ProgressCallback | None = None) -> list[str]:
+    """Make pip-installed NVIDIA CUDA runtime DLLs loadable on Windows.
+
+    Packages like nvidia-cublas-cu12/nvidia-cudnn-cu12 ship cublas64_12.dll,
+    cudnn64_9.dll, etc. under site-packages/nvidia/<name>/bin, but installing
+    them is not enough to make CTranslate2 find them: Windows' "safe DLL
+    search mode" (the default since Python 3.8) ignores PATH when an
+    extension module loads a DLL, so the file can sit right there in
+    site-packages and CTranslate2 still raises "... is not found or cannot be
+    loaded". os.add_dll_directory() is the documented way to opt a folder
+    back into that search.
+    """
+
+    added: list[str] = []
+    if sys.platform != "win32":
+        return added
+    try:
+        import nvidia  # type: ignore[import-not-found]
+    except ImportError:
+        return added
+    for nvidia_path in getattr(nvidia, "__path__", []):
+        nvidia_dir = Path(nvidia_path)
+        if not nvidia_dir.is_dir():
+            continue
+        for sub in nvidia_dir.iterdir():
+            bin_dir = sub / "bin"
+            if not bin_dir.is_dir():
+                continue
+            try:
+                os.add_dll_directory(str(bin_dir))  # type: ignore[attr-defined]
+            except (OSError, AttributeError):
+                continue
+            added.append(str(bin_dir))
+    if progress and added:
+        progress("Added NVIDIA CUDA runtime DLL directories: " + ", ".join(added))
+    return added
 
 
 def _load_whisper_model_with_heartbeat(
@@ -191,6 +234,7 @@ def transcribe_file(
         if progress:
             progress(f"Loading model {model_name} on {device} ({resolved_compute}) from local cache...")
         if device in {"cuda", "auto"}:
+            _add_nvidia_pip_dll_directories(progress)
             log_cuda_diagnostics(progress)
 
         if importlib.util.find_spec("faster_whisper") is None:
