@@ -8,7 +8,7 @@
 
 > Chrome extension that hoards every file, folder, assignment, syllabus and recording link from an Ariel University Moodle course into one tidy ZIP.
 
-![version](https://img.shields.io/badge/version-2.5.3-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
+![version](https://img.shields.io/badge/version-2.5.4-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
 
 ---
 
