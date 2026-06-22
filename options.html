@@ -297,6 +297,21 @@
     color: var(--muted);
     padding: 24px;
   }
+
+  /* About / credit footer */
+  section.about .about-story {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--fg);
+    margin: 0 0 12px;
+    text-align: right;
+  }
+  section.about .about-copy {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0;
+    text-align: right;
+  }
 </style>
 </head>
 <body>
@@ -530,10 +545,24 @@
   </div>
 </section>
 
+<section class="about">
+  <h2>אודות</h2>
+  <p class="about-story">
+    Moodle Hoarder נולד מתוך תסכול — חבורת סטודנטים שנמאס להם להוריד כל קובץ
+    בנפרד ולהיאבק במודל איטי ומסורבל, החליטו פשוט להפוך אותו לכלי אחד יעיל
+    שמוריד את כל הקורס בלחיצה אחת.
+  </p>
+  <p class="about-copy">© <span id="aboutYear">2026</span> E.A — כל הזכויות שמורות.</p>
+</section>
+
 </main>
 
 <div id="status" data-i18n="status.saved">נשמר</div>
 
+<script>
+  // Keep the copyright year current without hardcoding it.
+  document.getElementById('aboutYear').textContent = new Date().getFullYear();
+</script>
 <script src="settings.js"></script>
 <script src="i18n.js"></script>
 <script src="options.js"></script>
