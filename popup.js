@@ -220,6 +220,11 @@ document.addEventListener('keydown', (e) => {
     console.error('[Moodle Hoarder] loadCachedSettings failed:', e);
   }
   try {
+    await maybeShowDisclaimer();
+  } catch (e) {
+    console.error('[Moodle Hoarder] disclaimer failed:', e);
+  }
+  try {
     await refreshQueueArea();
   } catch (e) {
     console.error('[Moodle Hoarder] refreshQueueArea failed:', e);
@@ -240,6 +245,22 @@ document.addEventListener('keydown', (e) => {
     console.error('[Moodle Hoarder] auto-dashboard-scan failed:', e);
   }
 })();
+
+// One-time disclaimer: shown on first popup open until acknowledged. Records
+// consent in chrome.storage.local. Text is data-i18n, already translated by
+// loadCachedSettings()'s applyLanguage call before this runs.
+async function maybeShowDisclaimer() {
+  const overlay = document.getElementById('disclaimerOverlay');
+  if (!overlay) return;
+  let accepted = false;
+  try { accepted = (await chrome.storage.local.get('mhDisclaimerAccepted')).mhDisclaimerAccepted === true; } catch {}
+  if (accepted) return;
+  overlay.classList.add('show');
+  document.getElementById('disclaimerAccept')?.addEventListener('click', async () => {
+    try { await chrome.storage.local.set({ mhDisclaimerAccepted: true }); } catch {}
+    overlay.classList.remove('show');
+  }, { once: true });
+}
 
 // Throttled "new version available" check (gated by settings.checkUpdates).
 // The banner explains the 2-step unpacked update: run update.bat, then Reload.

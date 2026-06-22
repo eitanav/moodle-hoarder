@@ -355,6 +355,23 @@
   #log .err { color: var(--err); }
   #log .ok { color: var(--ok); }
 
+  /* First-run disclaimer overlay */
+  #disclaimerOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 50;
+    padding: 16px 16px 18px;
+    overflow-y: auto;
+  }
+  #disclaimerOverlay.show { display: block; }
+  #disclaimerOverlay h2 { margin: 0 0 10px; font-size: 16px; color: var(--accent); }
+  #disclaimerOverlay p { font-size: 12px; line-height: 1.5; margin: 0 0 8px; }
+  #disclaimerOverlay ul { margin: 0 0 12px; padding-inline-start: 18px; }
+  #disclaimerOverlay li { font-size: 12px; line-height: 1.5; margin-bottom: 6px; }
+  #disclaimerOverlay strong { unicode-bidi: isolate; }
+
   .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; unicode-bidi: plaintext; }
   /* code בתוך טקסט עברי — בידוד כיווני כדי למנוע ערבוב BiDi */
   code { direction: ltr; unicode-bidi: isolate; font-size: 10px; }
@@ -364,6 +381,16 @@
 </style>
 </head>
 <body>
+<div id="disclaimerOverlay">
+  <h2 data-i18n="disc.title">לפני שמתחילים</h2>
+  <p data-i18n-html="1" data-i18n="disc.body">Moodle Hoarder הוא כלי <strong>לא רשמי</strong>, שאינו קשור לאוניברסיטת אריאל או לכל מוסד אחר.</p>
+  <ul>
+    <li data-i18n-html="1" data-i18n="disc.li1"></li>
+    <li data-i18n-html="1" data-i18n="disc.li2"></li>
+    <li data-i18n-html="1" data-i18n="disc.li3"></li>
+  </ul>
+  <button id="disclaimerAccept" data-i18n="disc.accept">הבנתי, אני מסכים/ה</button>
+</div>
 <header>
   <img src="icons/icon-48.png" alt="">
   <div style="flex:1;">

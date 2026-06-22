@@ -303,6 +303,14 @@ const MH_STRINGS = {
     'opt.updates.openext': 'פתח דף תוספים',
     'opt.updates.changelog': 'מה חדש',
     'pop.update.available': '🆕 גרסה חדשה {v} זמינה — הרץ update.bat ואז Reload בדף התוספים.',
+
+    // ----- First-run disclaimer / consent -----
+    'disc.title': 'לפני שמתחילים',
+    'disc.body': 'Moodle Hoarder הוא כלי <strong>לא רשמי</strong>, שאינו קשור לאוניברסיטת אריאל או לכל מוסד אחר.',
+    'disc.li1': 'הכלי מיועד <strong>לשימוש אישי בלבד</strong> — להורדת חומרי הקורסים שלך. אין להפיץ מחדש חומרים המוגנים בזכויות יוצרים.',
+    'disc.li2': 'ייתכן שהורדה אוטומטית בכמות נוגדת את תנאי השימוש של המוסד — באחריותך לוודא שאתה עומד בהם.',
+    'disc.li3': 'הכלי ניתן כמות-שהוא (AS IS), ללא אחריות, והמפתח אינו אחראי לכל שימוש שנעשה בו.',
+    'disc.accept': 'הבנתי, אני מסכים/ה',
   },
   en: {
     'app.title': 'Moodle Hoarder',
@@ -575,6 +583,14 @@ const MH_STRINGS = {
     'opt.updates.openext': 'Open extensions page',
     'opt.updates.changelog': 'What’s new',
     'pop.update.available': '🆕 New version {v} available — run update.bat then Reload on the extensions page.',
+
+    // ----- First-run disclaimer / consent -----
+    'disc.title': 'Before you start',
+    'disc.body': 'Moodle Hoarder is an <strong>unofficial</strong> tool, not affiliated with Ariel University or any institution.',
+    'disc.li1': 'It is for <strong>personal use only</strong> — to download your own course materials. Do not redistribute copyrighted materials.',
+    'disc.li2': 'Bulk automated downloading may conflict with your institution’s terms of use — it is your responsibility to comply with them.',
+    'disc.li3': 'The tool is provided AS IS, without warranty, and the developer is not responsible for how it is used.',
+    'disc.accept': 'I understand and agree',
   },
 };
 
