@@ -1347,8 +1347,12 @@ $('downloadZoomLinks').addEventListener('click', async () => {
       notify('Moodle Hoarder', `Zoom: ${ok}/${selected.length} קישורים נחלצו`);
     }
 
-    // Debug capture (only when checkbox ticked).
+    // Debug capture (only when checkbox ticked). Needs the optional debugger
+    // permission — ask for it from this user gesture and skip if declined.
     if (debugChk?.checked && withUrls.length) {
+      if (!(await ensureDebuggerPermission())) {
+        setStatus('🎬 צריך לאשר הרשאת debugger כדי לתעד בקשות רשת.');
+      } else {
       const debugTargets = withUrls.slice(0, 2);
       setStatus(`🎬 תלכוד network ל-${debugTargets.length} הקלטות (~25 שניות לכל אחת)...`);
       try {
@@ -1362,6 +1366,7 @@ $('downloadZoomLinks').addEventListener('click', async () => {
         setStatus(`🎬 קובץ debug ירד.`);
       } catch (e) {
         setStatus('🎬 שגיאת תלכוד: ' + e.message);
+      }
       }
     }
   } finally {
@@ -1766,9 +1771,23 @@ $('zoomDiagCopy')?.addEventListener('click', async () => {
   }
 });
 
+// The `debugger` permission is OPTIONAL (it's only needed for the advanced
+// Zoom diagnostics, and required-debugger scares users + Chrome Web Store
+// review). Request it on demand, from the click's user gesture. Returns true
+// once the API is available.
+async function ensureDebuggerPermission() {
+  if (chrome.debugger) return true;
+  try {
+    const granted = await chrome.permissions.request({ permissions: ['debugger'] });
+    return !!granted && !!chrome.debugger;
+  } catch {
+    return false;
+  }
+}
+
 $('zoomResearch')?.addEventListener('click', async () => {
   if (!zoomScanned) { setStatus('🔬 קודם סרוק דף הקלטות Zoom.'); return; }
-  if (!chrome.debugger) { setStatus('🔬 הרשאת debugger חסרה — טען מחדש את התוסף ב-chrome://extensions.'); return; }
+  if (!(await ensureDebuggerPermission())) { setStatus('🔬 צריך לאשר הרשאת debugger כדי להריץ מחקר עמוק.'); return; }
   const selected = zoomGetSelected();
   if (!selected.length) { setStatus('🔬 בחר לפחות הקלטה אחת.'); return; }
   $('zoomResearch').disabled = true;
