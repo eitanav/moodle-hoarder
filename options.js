@@ -106,7 +106,10 @@ function historyStatusLabel(status) {
   })[status] || '—';
 }
 
-async function renderHistory() {
+// Loads all download-history entries (new downloadHistory list + legacy
+// seen_<courseId> records) sorted newest-first. Shared by the history table
+// and the time-saved counter.
+async function loadHistoryEntries() {
   const stored = await chrome.storage.local.get(null);
   const entries = Array.isArray(stored[DOWNLOAD_HISTORY_KEY]) ? [...stored[DOWNLOAD_HISTORY_KEY]] : [];
   const seenCourseIdsInHistory = new Set(entries.map(e => String(e.courseId || '')).filter(Boolean));
@@ -131,6 +134,39 @@ async function renderHistory() {
     });
   }
   entries.sort((a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
+  return entries;
+}
+
+// Rough estimate of the manual time each downloaded item would have cost
+// (navigate to it, click, Save As, rename). Deliberately conservative.
+const SECONDS_PER_ITEM = 25;
+
+function formatDuration(totalSeconds) {
+  const mins = Math.max(0, Math.round(totalSeconds / 60));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? t('opt.stats.time.hm', { h, m }) : t('opt.stats.time.m', { m });
+}
+
+// Renders the "time you saved" card from the download history.
+async function renderStats(entries) {
+  const card = $('#statsCard');
+  if (!card) return;
+  entries = entries || await loadHistoryEntries();
+  const totalItems = entries.reduce((sum, e) => sum + (e.itemCount ?? e.successCount ?? 0), 0);
+  if (!entries.length || totalItems === 0) {
+    card.innerHTML = `<p class="note">${escapeHtml(t('opt.stats.none'))}</p>`;
+    return;
+  }
+  const time = formatDuration(totalItems * SECONDS_PER_ITEM);
+  card.innerHTML = `
+    <p class="headline">${escapeHtml(t('opt.stats.headline', { time }))}</p>
+    <p class="sub">${escapeHtml(t('opt.stats.sub', { items: totalItems, n: entries.length }))}</p>
+    <p class="note">${escapeHtml(t('opt.stats.note', { sec: SECONDS_PER_ITEM }))}</p>`;
+}
+
+async function renderHistory() {
+  const entries = await loadHistoryEntries();
 
   const table = $('#historyTable');
   if (!entries.length) {
@@ -177,6 +213,30 @@ function applyDynamicI18n() {
   if (copy) copy.textContent = t('opt.about.copy', { year: new Date().getFullYear() });
 }
 
+// Last update-check result, kept so the banner text can be re-rendered when
+// the UI language changes.
+let lastUpdateInfo = null;
+
+function showUpdateResult(info, { showResultLine = true } = {}) {
+  lastUpdateInfo = info;
+  const head = $('#updateBannerHead');
+  const banner = $('#updateBanner');
+  const result = $('#updateCheckResult');
+  if (info && info.hasUpdate) {
+    const msg = t('opt.updates.available', { v: info.latest });
+    if (head) head.textContent = msg;
+    if (banner) banner.style.display = 'block';
+    if (result && showResultLine) result.textContent = msg;
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (result && showResultLine) {
+      result.textContent = info && info.error
+        ? t('opt.updates.failed')
+        : t('opt.updates.uptodate', { v: (info && info.current) || mhCurrentVersion() });
+    }
+  }
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
@@ -221,6 +281,8 @@ function escapeHtml(s) {
         const s = await getSettings();
         renderFileTypes(s);
         await renderHistory();
+        await renderStats();
+        if (lastUpdateInfo) showUpdateResult(lastUpdateInfo, { showResultLine: false });
       };
     }
     bindRadios(wrap, key, settings, onChange);
@@ -228,6 +290,24 @@ function escapeHtml(s) {
 
   renderFileTypes(settings);
   await renderHistory();
+  await renderStats();
+
+  // ----- Updates -----
+  const cv = $('#currentVersion');
+  if (cv && typeof mhCurrentVersion === 'function') cv.textContent = 'v' + mhCurrentVersion();
+  $('#updateOpenExt')?.addEventListener('click', () => { if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage(); });
+  $('#checkUpdateNow')?.addEventListener('click', async () => {
+    const result = $('#updateCheckResult');
+    if (result) result.textContent = t('opt.updates.checking');
+    const info = await mhCheckForUpdate(true);
+    showUpdateResult(info);
+  });
+  // Passive, throttled check on open — only surface the banner if newer.
+  if (settings.checkUpdates !== false && typeof mhCheckForUpdate === 'function') {
+    mhCheckForUpdate(false)
+      .then(info => { if (info && info.hasUpdate) showUpdateResult(info, { showResultLine: false }); })
+      .catch(() => {});
+  }
 
   $('#clearHistory').addEventListener('click', async () => {
     if (!confirm(t('opt.history.clear.confirm'))) return;

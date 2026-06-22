@@ -312,6 +312,42 @@
     margin: 0;
     text-align: right;
   }
+
+  /* Time-saved stats card */
+  .stats-card {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    text-align: right;
+  }
+  .stats-card .headline {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0 0 4px;
+  }
+  .stats-card .sub { font-size: 13px; color: var(--fg); margin: 0 0 6px; }
+  .stats-card .note { font-size: 11px; color: var(--muted); margin: 0; }
+
+  /* Update banner (top of page) */
+  .update-banner {
+    background: var(--row);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    text-align: right;
+  }
+  .update-banner .ub-head {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .update-banner .ub-how { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .update-banner .ub-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .update-banner .ub-actions a { font-size: 12px; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -324,6 +360,20 @@
 </header>
 
 <main>
+
+<div class="update-banner" id="updateBanner" style="display:none;">
+  <div class="ub-head" id="updateBannerHead"></div>
+  <div class="ub-how" data-i18n-html="1" data-i18n="opt.updates.howto">כדי לעדכן: הרץ <code>update.bat</code> בתיקיית התוסף, ואז לחץ על אייקון ה-Reload בדף התוספים.</div>
+  <div class="ub-actions">
+    <button class="action" id="updateOpenExt" data-i18n="opt.updates.openext">פתח דף תוספים</button>
+    <a id="updateChangelog" href="https://github.com/eitanav/moodle-hoarder/blob/main/CHANGELOG.md" target="_blank" data-i18n="opt.updates.changelog">מה חדש</a>
+  </div>
+</div>
+
+<section class="stats">
+  <h2 data-i18n="opt.section.stats">כמה זמן חסכתי לך</h2>
+  <div class="stats-card" id="statsCard"></div>
+</section>
 
 <section>
   <h2 data-i18n="opt.section.language">שפת ממשק</h2>
@@ -545,6 +595,28 @@
   </div>
 </section>
 
+<section>
+  <h2 data-i18n="opt.section.updates">עדכונים</h2>
+  <p class="desc" data-i18n="opt.updates.desc">בדיקה אוטומטית אם יצאה גרסה חדשה ב-GitHub</p>
+  <div class="row">
+    <div class="label">
+      <div class="name" data-i18n="opt.updates.check.name">בדיקת עדכונים אוטומטית</div>
+      <div class="hint" data-i18n="opt.updates.check.hint">בכל פתיחה (לכל היותר אחת לכמה שעות) נבדק אם קיימת גרסה חדשה. זו בקשת GET לקובץ ציבורי ב-GitHub — לא נשלח שום מידע אישי.</div>
+    </div>
+    <div class="control"><input type="checkbox" class="toggle" data-setting="checkUpdates"></div>
+  </div>
+  <div class="row">
+    <div class="label">
+      <div class="name" data-i18n="opt.updates.current">גרסה מותקנת</div>
+      <div class="hint"><span id="currentVersion">—</span></div>
+    </div>
+    <div class="control">
+      <button class="action secondary" id="checkUpdateNow" data-i18n="opt.updates.checknow">בדוק עכשיו</button>
+    </div>
+  </div>
+  <div class="hint" id="updateCheckResult" style="margin-top:8px;"></div>
+</section>
+
 <section class="about">
   <h2 data-i18n="opt.about.title">אודות</h2>
   <p class="about-story" data-i18n="opt.about.story">
@@ -561,6 +633,7 @@
 
 <script src="settings.js"></script>
 <script src="i18n.js"></script>
+<script src="updates.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

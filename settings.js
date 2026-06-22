@@ -73,6 +73,13 @@ const SETTINGS_DEFAULTS = {
   // 'he' or 'en' = force.
   uiLanguage: 'auto',
 
+  // Check GitHub for a newer version on popup/options open (throttled to once
+  // every few hours) and show an "update available" banner. The extension is
+  // installed unpacked, so Chrome can't auto-update it. This is a plain GET of
+  // the public manifest.json — no user data leaves the machine. Default on so
+  // users stay current; can be disabled in options.
+  checkUpdates: true,
+
   // Include course.json in the ZIP (ROADMAP #72). A structured dump of
   // the course (sections, items, types, URLs, sizes) — opens easy
   // integration with Notion / Anki / Sheets / scripts. Defaults to true:

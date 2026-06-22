@@ -374,6 +374,13 @@
 </header>
 
 <main>
+  <div class="banner" id="updateBanner">
+    <div id="updateBannerText"></div>
+    <div class="actions">
+      <button class="tiny" id="updateOpenExt" data-i18n="opt.updates.openext">פתח דף תוספים</button>
+      <a class="tiny" id="updateChangelog" href="https://github.com/eitanav/moodle-hoarder/blob/main/CHANGELOG.md" target="_blank" style="align-self:center; color:var(--accent); text-decoration:none;" data-i18n="opt.updates.changelog">מה חדש</a>
+    </div>
+  </div>
   <div id="initial">
     <button id="scan" data-i18n="btn.scan">סרוק</button>
     <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל או דף "הקורסים שלי", ולחץ "סרוק".</div>
@@ -492,6 +499,7 @@
 
 <script src="settings.js"></script>
 <script src="i18n.js"></script>
+<script src="updates.js"></script>
 <script src="zip.js"></script>
 <script src="popup.js"></script>
 </body>

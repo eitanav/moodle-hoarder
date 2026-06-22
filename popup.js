@@ -226,6 +226,12 @@ document.addEventListener('keydown', (e) => {
   }
 
   try {
+    await maybeShowUpdateBanner();
+  } catch (e) {
+    console.error('[Moodle Hoarder] update check failed:', e);
+  }
+
+  try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url && /moodlearn\.ariel\.ac\.il\/my\/?(?:[?#]|$|index\.php)/.test(tab.url)) {
       await runDashboardScan(tab);
@@ -234,6 +240,23 @@ document.addEventListener('keydown', (e) => {
     console.error('[Moodle Hoarder] auto-dashboard-scan failed:', e);
   }
 })();
+
+// Throttled "new version available" check (gated by settings.checkUpdates).
+// The banner explains the 2-step unpacked update: run update.bat, then Reload.
+async function maybeShowUpdateBanner() {
+  if (!CACHED_SETTINGS || CACHED_SETTINGS.checkUpdates === false) return;
+  if (typeof mhCheckForUpdate !== 'function') return;
+  const info = await mhCheckForUpdate(false);
+  if (!info || !info.hasUpdate) return;
+  const banner = document.getElementById('updateBanner');
+  const text = document.getElementById('updateBannerText');
+  if (!banner || !text) return;
+  text.textContent = t('pop.update.available', { v: info.latest });
+  banner.classList.add('show');
+  document.getElementById('updateOpenExt')?.addEventListener('click', () => {
+    if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage();
+  });
+}
 
 // Dashboard scan: shared between auto-bootstrap and the manual scan button
 // (in case the auto-scan needs to be retried).

@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Moodle Hoarder",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "Hoards every file, folder, assignment, syllabus and recording link from Ariel Moodle courses into tidy ZIPs. Plus Zoom cloud recording links.",
   "permissions": ["activeTab", "downloads", "scripting", "notifications", "storage", "unlimitedStorage", "contextMenus", "debugger", "offscreen", "declarativeNetRequest"],
   "host_permissions": [
     "https://moodlearn.ariel.ac.il/*",
     "https://*.ariel.ac.il/*",
     "https://zoom.us/*",
-    "https://*.zoom.us/*"
+    "https://*.zoom.us/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js"

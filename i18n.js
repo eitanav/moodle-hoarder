@@ -278,6 +278,31 @@ const MH_STRINGS = {
     'pop.zoom.debug.research': '🔬 מחקר עמוק',
     'pop.zoom.debug.hint': 'פתח רק כשמשהו נכשל. דיאגנוסטיקה — בודקת שלב אחר שלב את כל הצנרת. מחקר עמוק — מקליט trace רשת מלא באמצעות <code dir="ltr">chrome.debugger</code>.',
     'pop.zoom.debug.copy': '📋 העתק הכל',
+
+    // ----- Time-saved counter (options page) -----
+    'opt.section.stats': 'כמה זמן חסכתי לך',
+    'opt.stats.headline': 'חסכת בערך {time}',
+    'opt.stats.sub': '{items} פריטים מתוך {n} הורדות',
+    'opt.stats.note': 'הערכה גסה: ~{sec} שניות לפריט שאחרת היית מוריד ידנית',
+    'opt.stats.none': 'עוד לא הורדת כלום — המונה יתחיל לרוץ אחרי ההורדה הראשונה.',
+    'opt.stats.time.hm': '{h} שעות ו-{m} דקות',
+    'opt.stats.time.m': '{m} דקות',
+
+    // ----- Updates section + banner -----
+    'opt.section.updates': 'עדכונים',
+    'opt.updates.desc': 'בדיקה אוטומטית אם יצאה גרסה חדשה ב-GitHub',
+    'opt.updates.check.name': 'בדיקת עדכונים אוטומטית',
+    'opt.updates.check.hint': 'בכל פתיחה (לכל היותר אחת לכמה שעות) נבדק אם קיימת גרסה חדשה. זו בקשת GET לקובץ ציבורי ב-GitHub — לא נשלח שום מידע אישי.',
+    'opt.updates.current': 'גרסה מותקנת',
+    'opt.updates.checknow': 'בדוק עכשיו',
+    'opt.updates.checking': 'בודק…',
+    'opt.updates.uptodate': '✅ אתה מעודכן (גרסה {v})',
+    'opt.updates.available': '🆕 גרסה חדשה {v} זמינה!',
+    'opt.updates.failed': '⚠️ בדיקת העדכון נכשלה — בדוק חיבור לאינטרנט.',
+    'opt.updates.howto': 'כדי לעדכן: הרץ <code>update.bat</code> בתיקיית התוסף, ואז לחץ על אייקון ה-Reload בדף התוספים.',
+    'opt.updates.openext': 'פתח דף תוספים',
+    'opt.updates.changelog': 'מה חדש',
+    'pop.update.available': '🆕 גרסה חדשה {v} זמינה — הרץ update.bat ואז Reload בדף התוספים.',
   },
   en: {
     'app.title': 'Moodle Hoarder',
@@ -525,6 +550,31 @@ const MH_STRINGS = {
     'pop.zoom.debug.research': '🔬 Deep research',
     'pop.zoom.debug.hint': 'Open only when something fails. Diagnostics — checks the whole pipeline step by step. Deep research — records a full network trace via <code dir="ltr">chrome.debugger</code>.',
     'pop.zoom.debug.copy': '📋 Copy all',
+
+    // ----- Time-saved counter (options page) -----
+    'opt.section.stats': 'Time you saved',
+    'opt.stats.headline': 'You saved roughly {time}',
+    'opt.stats.sub': '{items} items across {n} downloads',
+    'opt.stats.note': 'Rough estimate: ~{sec}s per item you’d otherwise download by hand',
+    'opt.stats.none': 'Nothing downloaded yet — the counter starts after your first download.',
+    'opt.stats.time.hm': '{h}h {m}m',
+    'opt.stats.time.m': '{m}m',
+
+    // ----- Updates section + banner -----
+    'opt.section.updates': 'Updates',
+    'opt.updates.desc': 'Automatically check GitHub for a newer version',
+    'opt.updates.check.name': 'Automatic update check',
+    'opt.updates.check.hint': 'On open (at most once every few hours) the extension checks GitHub for a newer version. It is a GET of a public file — no personal data is sent.',
+    'opt.updates.current': 'Installed version',
+    'opt.updates.checknow': 'Check now',
+    'opt.updates.checking': 'Checking…',
+    'opt.updates.uptodate': '✅ You’re up to date (v{v})',
+    'opt.updates.available': '🆕 New version {v} available!',
+    'opt.updates.failed': '⚠️ Update check failed — check your connection.',
+    'opt.updates.howto': 'To update: run <code>update.bat</code> in the extension folder, then click the Reload icon on the extensions page.',
+    'opt.updates.openext': 'Open extensions page',
+    'opt.updates.changelog': 'What’s new',
+    'pop.update.available': '🆕 New version {v} available — run update.bat then Reload on the extensions page.',
   },
 };
 

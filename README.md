@@ -8,7 +8,7 @@
 
 > Chrome extension that hoards every file, folder, assignment, syllabus and recording link from an Ariel University Moodle course into one tidy ZIP.
 
-![version](https://img.shields.io/badge/version-2.6.1-orange) ![license](https://img.shields.io/badge/license-MIT-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
+![version](https://img.shields.io/badge/version-2.7.0-orange) ![license](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
 
 ---
 
@@ -101,10 +101,11 @@
 
 ## פרטיות
 
-- התוסף **לא שולח דאטה לשום שרת חיצוני**.
-- כל הפעולות רצות מקומית בדפדפן שלך.
+- התוסף **לא שולח שום מידע אישי, תוכן קורס או דאטה לשום שרת**.
+- כל עיבוד הקבצים רץ מקומית בדפדפן שלך.
 - ה-cookies של המודל שלך משמשים לאימות בדיוק כמו שהדפדפן עושה רגיל.
-- מה ש"זוכר" התוסף (רשימת קבצים שירדו לצורך מצב diff) נשמר ב-`chrome.storage.local` רק על המחשב שלך.
+- מה ש"זוכר" התוסף (רשימת קבצים שירדו, היסטוריה, הגדרות) נשמר ב-`chrome.storage.local` רק על המחשב שלך.
+- **הבקשה היחידה לאינטרנט** (מעבר למודל/Zoom עצמם) היא בדיקת עדכונים אופציונלית: GET לקובץ `manifest.json` הציבורי ב-GitHub כדי לבדוק אם יצאה גרסה חדשה. לא נשלח בה שום מידע, וניתן לכבות אותה בהגדרות. ראה [`PRIVACY.md`](PRIVACY.md).
 
 ## דרישות
 
@@ -131,10 +132,13 @@ cd moodle-hoarder
 
 ## רישיון
 
-[MIT](LICENSE)
+[PolyForm Noncommercial License 1.0.0](LICENSE) — מותר להשתמש, לשנות ולהפיץ **למטרות לא-מסחריות בלבד**, תוך שמירת הקרדיט (`Required Notice: Copyright © 2026 E.A`). אסור למכור או להשתמש מסחרית בלי רשות מבעל הזכויות. כל הזכויות שמורות ל-E.A.
 
 ## כתב ויתור
 
-תוסף לא רשמי, לא קשור לאוניברסיטת אריאל. נכתב בשביל סטודנטים לסטודנטים. השתמש על אחריותך.
+- תוסף **לא רשמי**, לא קשור לאוניברסיטת אריאל או לכל מוסד אחר.
+- מיועד **לשימוש אישי בלבד** — להורדת חומרי הקורסים שלך. אין להפיץ מחדש חומרי קורס המוגנים בזכויות יוצרים של המרצים/המוסד.
+- השימוש הוא באחריותך המלאה. ייתכן שהורדה אוטומטית בכמות נוגדת את תנאי השימוש של המוסד — באחריותך לוודא שאתה עומד בהם.
+- הכלי ניתן כמות-שהוא (AS IS), ללא אחריות מכל סוג, והמפתח אינו אחראי לכל שימוש שנעשה בו.
 
 </div>
