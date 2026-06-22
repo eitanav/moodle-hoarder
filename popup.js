@@ -325,7 +325,7 @@ async function refreshQueueArea() {
   if (!area) return;
   if (q.length === 0) { area.style.display = 'none'; return; }
   area.style.display = 'block';
-  document.getElementById('queueCountText').textContent = `${q.length} פריטים בתור`;
+  document.getElementById('queueCountText').textContent = t('pop.queue.count', { n: q.length });
 }
 
 document.getElementById('clearQueue')?.addEventListener('click', async () => {

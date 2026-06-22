@@ -265,6 +265,7 @@ const MH_STRINGS = {
     'ft.h5pactivity': 'H5P',
 
     // ----- Popup: remaining static UI -----
+    'pop.queue.count': '{n} פריטים בתור',
     'pop.queue.suffix': ' · הורד הכל כ-ZIP',
     'pop.queue.clear': 'נקה תור',
     'pop.deadlines.mycourses.html': '💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.',
@@ -511,6 +512,7 @@ const MH_STRINGS = {
     'ft.h5pactivity': 'H5P',
 
     // ----- Popup: remaining static UI -----
+    'pop.queue.count': '{n} items queued',
     'pop.queue.suffix': ' · Download all as ZIP',
     'pop.queue.clear': 'Clear queue',
     'pop.deadlines.mycourses.html': '💡 To download course files — go to the <a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">"My courses" page</a> and click the extension icon again.',
