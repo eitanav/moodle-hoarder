@@ -2,7 +2,7 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<title>Moodle Hoarder — הגדרות</title>
+<title data-i18n="options.header.title">Moodle Hoarder — הגדרות</title>
 <script src="theme-bootstrap.js"></script>
 <style>
   :root {
@@ -327,7 +327,7 @@
 
 <section>
   <h2 data-i18n="opt.section.language">שפת ממשק</h2>
-  <p class="desc">בחר את שפת הממשק של התוסף (לא משפיע על תוכן הקורסים)</p>
+  <p class="desc" data-i18n="opt.lang.desc">בחר את שפת הממשק של התוסף (לא משפיע על תוכן הקורסים)</p>
   <div class="row">
     <div class="label">
       <div class="name" data-i18n="opt.lang.title">שפת ממשק</div>
@@ -345,36 +345,36 @@
 
 <section>
   <h2 data-i18n="opt.section.appearance">מראה</h2>
-  <p class="desc">בהיר / כהה / לפי הגדרת מערכת ההפעלה</p>
+  <p class="desc" data-i18n="opt.appearance.desc">בהיר / כהה / לפי הגדרת מערכת ההפעלה</p>
   <div class="row">
     <div class="label">
-      <div class="name">ערכת נושא</div>
-      <div class="hint">"אוטומטי" יתאם את עצמו להגדרת מצב כהה של Windows/macOS. "בהיר" / "כהה" כופים בצורה ידנית.</div>
+      <div class="name" data-i18n="opt.theme.name">ערכת נושא</div>
+      <div class="hint" data-i18n="opt.theme.hint">"אוטומטי" יתאם את עצמו להגדרת מצב כהה של Windows/macOS. "בהיר" / "כהה" כופים בצורה ידנית.</div>
     </div>
     <div class="control">
       <div class="radios" data-setting="theme">
-        <label><input type="radio" name="theme" value="auto">אוטומטי</label>
-        <label><input type="radio" name="theme" value="light">בהיר</label>
-        <label><input type="radio" name="theme" value="dark">כהה</label>
+        <label><input type="radio" name="theme" value="auto"><span data-i18n="opt.theme.auto">אוטומטי</span></label>
+        <label><input type="radio" name="theme" value="light"><span data-i18n="opt.theme.light">בהיר</span></label>
+        <label><input type="radio" name="theme" value="dark"><span data-i18n="opt.theme.dark">כהה</span></label>
       </div>
     </div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">צבע ראשי</div>
-      <div class="hint">"כתום-ורוד" הוא הצבע הברירת-מחדל של התוסף. "כחול אריאל" מתאים לערכת הצבעים של אוניברסיטת אריאל.</div>
+      <div class="name" data-i18n="opt.accent.name">צבע ראשי</div>
+      <div class="hint" data-i18n="opt.accent.hint">"כתום-ורוד" הוא הצבע הברירת-מחדל של התוסף. "כחול אריאל" מתאים לערכת הצבעים של אוניברסיטת אריאל.</div>
     </div>
     <div class="control">
       <div class="radios" data-setting="accentColor">
-        <label><input type="radio" name="accentColor" value="orange-pink">כתום-ורוד</label>
-        <label><input type="radio" name="accentColor" value="blue-ariel">כחול אריאל</label>
+        <label><input type="radio" name="accentColor" value="orange-pink"><span data-i18n="opt.accent.orangepink">כתום-ורוד</span></label>
+        <label><input type="radio" name="accentColor" value="blue-ariel"><span data-i18n="opt.accent.blue">כחול אריאל</span></label>
       </div>
     </div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">מצב קומפקטי</div>
-      <div class="hint">פריטים בשורה אחת קטנה במקום שתיים. נוח לקורסים גדולים עם הרבה פריטים.</div>
+      <div class="name" data-i18n="opt.compact.name">מצב קומפקטי</div>
+      <div class="hint" data-i18n="opt.compact.hint">פריטים בשורה אחת קטנה במקום שתיים. נוח לקורסים גדולים עם הרבה פריטים.</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="compactMode"></div>
   </div>
@@ -382,17 +382,17 @@
 
 <section>
   <h2 data-i18n="opt.section.zip">מבנה ה-ZIP</h2>
-  <p class="desc">איך לארגן את הקבצים בתוך קובץ ה-ZIP שמורד</p>
+  <p class="desc" data-i18n="opt.zip.desc">איך לארגן את הקבצים בתוך קובץ ה-ZIP שמורד</p>
   <div class="row">
     <div class="label">
-      <div class="name">פריסה</div>
-      <div class="hint">"לפי קטעים" יוצר תיקייה לכל קטע במודל. "הכל ביחד" שם את כל הקבצים בתיקייה אחת שטוחה. "שניהם" מייצר את שני המבנים בתוך אותו ZIP (ברירת מחדל, ZIP גדול פי שניים).</div>
+      <div class="name" data-i18n="opt.zip.layout.name">פריסה</div>
+      <div class="hint" data-i18n="opt.zip.layout.hint">"לפי קטעים" יוצר תיקייה לכל קטע במודל. "הכל ביחד" שם את כל הקבצים בתיקייה אחת שטוחה. "שניהם" מייצר את שני המבנים בתוך אותו ZIP (ברירת מחדל, ZIP גדול פי שניים).</div>
     </div>
     <div class="control">
       <div class="radios" data-setting="zipLayout">
-        <label><input type="radio" name="zipLayout" value="sections">לפי קטעים</label>
-        <label><input type="radio" name="zipLayout" value="flat">הכל ביחד</label>
-        <label><input type="radio" name="zipLayout" value="both">שניהם</label>
+        <label><input type="radio" name="zipLayout" value="sections"><span data-i18n="opt.zip.sections">לפי קטעים</span></label>
+        <label><input type="radio" name="zipLayout" value="flat"><span data-i18n="opt.zip.flat">הכל ביחד</span></label>
+        <label><input type="radio" name="zipLayout" value="both"><span data-i18n="opt.zip.both">שניהם</span></label>
       </div>
     </div>
   </div>
@@ -400,18 +400,18 @@
 
 <section>
   <h2 data-i18n="opt.section.download">הורדה</h2>
-  <p class="desc">איפה וכיצד נשמרים הקבצים</p>
+  <p class="desc" data-i18n="opt.download.desc">איפה וכיצד נשמרים הקבצים</p>
   <div class="row">
     <div class="label">
-      <div class="name">"Save As" — לבחור איפה לשמור</div>
-      <div class="hint">בכל הורדה ייפתח דיאלוג של Chrome לבחירת מיקום. ברירת מחדל כבוי — הקובץ יורד אוטומטית לתיקיית Downloads.</div>
+      <div class="name" data-i18n="opt.saveas.name">"Save As" — לבחור איפה לשמור</div>
+      <div class="hint" data-i18n="opt.saveas.hint">בכל הורדה ייפתח דיאלוג של Chrome לבחירת מיקום. ברירת מחדל כבוי — הקובץ יורד אוטומטית לתיקיית Downloads.</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="saveAs"></div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">תת-תיקייה ב-Downloads</div>
-      <div class="hint">למשל <code>Moodle/2026-spring/</code> — Chrome לא מאפשר נתיב מוחלט מתוסף, אבל אפשר ליצור תת-תיקייה בתוך Downloads. השאר ריק כדי לשמור ישירות ב-Downloads.</div>
+      <div class="name" data-i18n="opt.subfolder.name">תת-תיקייה ב-Downloads</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.subfolder.hint">למשל <code>Moodle/2026-spring/</code> — Chrome לא מאפשר נתיב מוחלט מתוסף, אבל אפשר ליצור תת-תיקייה בתוך Downloads. השאר ריק כדי לשמור ישירות ב-Downloads.</div>
     </div>
     <div class="control" style="width: 240px;">
       <input type="text" data-setting="downloadSubfolder" placeholder="Downloads/...">
@@ -421,25 +421,25 @@
 
 <section>
   <h2 data-i18n="opt.section.content">תוכן</h2>
-  <p class="desc">אילו פעילויות לכלול בהורדה</p>
+  <p class="desc" data-i18n="opt.content.desc">אילו פעילויות לכלול בהורדה</p>
   <div class="row">
     <div class="label">
-      <div class="name">כלילת ציונים</div>
-      <div class="hint">שולף את העמוד Grader Report של הקורס ומוסיף ל-ZIP כקובץ <code>ציונים.csv</code>. <strong>שים לב — כשמשתפים את ה-ZIP, גם הציונים שלך נכללים.</strong> ברירת מחדל כבוי.</div>
+      <div class="name" data-i18n="opt.grades.name">כלילת ציונים</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.grades.hint">שולף את העמוד Grader Report של הקורס ומוסיף ל-ZIP כקובץ <code>ציונים.csv</code>. <strong>שים לב — כשמשתפים את ה-ZIP, גם הציונים שלך נכללים.</strong> ברירת מחדל כבוי.</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="includeGrades"></div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">כלילת <code>course.json</code></div>
-      <div class="hint">מוסיף ל-ZIP קובץ JSON מובנה עם מבנה הקורס המלא — sections, items, types, URLs, גדלי קבצים, errors. שימושי לאינטגרציות עם Notion / Anki / Sheets / סקריפטים. קטן (~10-50KB), לא כולל את הקבצים עצמם. ברירת מחדל פעיל.</div>
+      <div class="name" data-i18n-html="1" data-i18n="opt.json.name">כלילת <code>course.json</code></div>
+      <div class="hint" data-i18n="opt.json.hint">מוסיף ל-ZIP קובץ JSON מובנה עם מבנה הקורס המלא — sections, items, types, URLs, גדלי קבצים, errors. שימושי לאינטגרציות עם Notion / Anki / Sheets / סקריפטים. קטן (~10-50KB), לא כולל את הקבצים עצמם. ברירת מחדל פעיל.</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="includeJson"></div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">סף גודל קובץ (MB)</div>
-      <div class="hint">קבצים גדולים מהסף לא יסומנו בדיפולט בבורר הקורס — תקבל אזהרה ותוכל לסמן ידנית. <code>0</code> = מבוטל (כל הקבצים נבחרים כרגיל).</div>
+      <div class="name" data-i18n="opt.maxsize.name">סף גודל קובץ (MB)</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.maxsize.hint">קבצים גדולים מהסף לא יסומנו בדיפולט בבורר הקורס — תקבל אזהרה ותוכל לסמן ידנית. <code>0</code> = מבוטל (כל הקבצים נבחרים כרגיל).</div>
     </div>
     <div class="control" style="width: 100px;">
       <input type="number" min="0" step="1" data-setting="maxFileSizeMB" placeholder="0">
@@ -447,8 +447,8 @@
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">סוגי פעילויות מסומנים כברירת מחדל</div>
-      <div class="hint">בעת סריקה של קורס, הפעילויות האלה מסומנות אוטומטית. עדיין ניתן לבחור ידנית פר קורס.</div>
+      <div class="name" data-i18n="opt.filetypes.name">סוגי פעילויות מסומנים כברירת מחדל</div>
+      <div class="hint" data-i18n="opt.filetypes.hint">בעת סריקה של קורס, הפעילויות האלה מסומנות אוטומטית. עדיין ניתן לבחור ידנית פר קורס.</div>
       <div class="filetypes" id="fileTypes"></div>
     </div>
   </div>
@@ -456,38 +456,38 @@
 
 <section>
   <h2>Zoom</h2>
-  <p class="desc">הגדרות הקלטות Zoom (חלות רק כשפותחים דף Zoom Recordings באריאל)</p>
+  <p class="desc" data-i18n="opt.zoom.desc">הגדרות הקלטות Zoom (חלות רק כשפותחים דף Zoom Recordings באריאל)</p>
   <div class="row">
     <div class="label">
-      <div class="name">הורדת קובצי הוידאו (MP4)</div>
-      <div class="hint">הורדת ההקלטות עצמן מתבצעת דרך כפתור 🎥 <strong>"הורד סרטונים"</strong> שמופיע אחרי סריקת דף ה-Zoom — לא צריך טוגל כאן. כל הקלטה נשמרת בנפרד ב-Downloads (או בתת-התיקייה שהגדרת). קבצים גדולים — 200MB עד 2GB כל אחד. ההורדה ממשיכה ברקע גם אם תסגור את הפופאפ.</div>
+      <div class="name" data-i18n="opt.zoom.video.name">הורדת קובצי הוידאו (MP4)</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.zoom.video.hint">הורדת ההקלטות עצמן מתבצעת דרך כפתור 🎥 <strong>"הורד סרטונים"</strong> שמופיע אחרי סריקת דף ה-Zoom — לא צריך טוגל כאן. כל הקלטה נשמרת בנפרד ב-Downloads (או בתת-התיקייה שהגדרת). קבצים גדולים — 200MB עד 2GB כל אחד. ההורדה ממשיכה ברקע גם אם תסגור את הפופאפ.</div>
     </div>
-    <div class="control" style="color:var(--muted); font-size:11px;">דרך כפתור 🎥</div>
+    <div class="control" style="color:var(--muted); font-size:11px;" data-i18n="opt.zoom.video.control">דרך כפתור 🎥</div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">חילוץ תמלילים אוטומטי</div>
-      <div class="hint">אחרי שמחלצים URLs של הקלטות, התוסף פותח כל אחת ב-tab רקעי ותופס את ה-VTT (התמליל האוטומטי של Zoom). אם כיבית — תקבל רק קובץ טקסט עם הקישורים, בלי ZIP. <strong>הקלטות בלי תמליל מדולגות אחרי 8 שניות</strong> (בודק שיש UI של תמליל בדף).</div>
+      <div class="name" data-i18n="opt.zoom.transcripts.name">חילוץ תמלילים אוטומטי</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.zoom.transcripts.hint">אחרי שמחלצים URLs של הקלטות, התוסף פותח כל אחת ב-tab רקעי ותופס את ה-VTT (התמליל האוטומטי של Zoom). אם כיבית — תקבל רק קובץ טקסט עם הקישורים, בלי ZIP. <strong>הקלטות בלי תמליל מדולגות אחרי 8 שניות</strong> (בודק שיש UI של תמליל בדף).</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="extractTranscripts"></div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">פורמט תמלילים</div>
-      <div class="hint">"שניהם" — גם <code>.vtt</code> מקורי (עם timestamps, יושב כסאבטייטל על וידאו) וגם <code>.txt</code> נקי לקריאה (עם דוברים ופסקאות). "רק טקסט" / "רק VTT" מקטינים את ה-ZIP.</div>
+      <div class="name" data-i18n="opt.zoom.format.name">פורמט תמלילים</div>
+      <div class="hint" data-i18n-html="1" data-i18n="opt.zoom.format.hint">"שניהם" — גם <code>.vtt</code> מקורי (עם timestamps, יושב כסאבטייטל על וידאו) וגם <code>.txt</code> נקי לקריאה (עם דוברים ופסקאות). "רק טקסט" / "רק VTT" מקטינים את ה-ZIP.</div>
     </div>
     <div class="control">
       <div class="radios" data-setting="transcriptFormats">
-        <label><input type="radio" name="transcriptFormats" value="both">שניהם</label>
-        <label><input type="radio" name="transcriptFormats" value="txt">רק טקסט</label>
-        <label><input type="radio" name="transcriptFormats" value="vtt">רק VTT</label>
+        <label><input type="radio" name="transcriptFormats" value="both"><span data-i18n="opt.zoom.format.both">שניהם</span></label>
+        <label><input type="radio" name="transcriptFormats" value="txt"><span data-i18n="opt.zoom.format.txt">רק טקסט</span></label>
+        <label><input type="radio" name="transcriptFormats" value="vtt"><span data-i18n="opt.zoom.format.vtt">רק VTT</span></label>
       </div>
     </div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">מספר הקלטות במקביל</div>
-      <div class="hint">כמה תמלילים לחלץ בו-זמנית. 3 זה איזון טוב בין מהירות לעומס. גבוה יותר (4-5) ייתכן שיגרום ל-Zoom לחסום או יכבד על המחשב. תחום: 1-5.</div>
+      <div class="name" data-i18n="opt.zoom.concurrency.name">מספר הקלטות במקביל</div>
+      <div class="hint" data-i18n="opt.zoom.concurrency.hint">כמה תמלילים לחלץ בו-זמנית. 3 זה איזון טוב בין מהירות לעומס. גבוה יותר (4-5) ייתכן שיגרום ל-Zoom לחסום או יכבד על המחשב. תחום: 1-5.</div>
     </div>
     <div class="control" style="width: 100px;">
       <input type="number" min="1" max="5" step="1" data-setting="transcriptConcurrency" placeholder="3">
@@ -497,24 +497,24 @@
 
 <section>
   <h2 data-i18n="opt.section.rightclick">קליק ימני</h2>
-  <p class="desc">התנהגות התפריט "הורד עם Moodle Hoarder"</p>
+  <p class="desc" data-i18n="opt.rightclick.desc">התנהגות התפריט "הורד עם Moodle Hoarder"</p>
   <div class="row">
     <div class="label">
-      <div class="name">פעולה</div>
-      <div class="hint">"מיד" — הורד מיד את הקובץ. "תור" — הוסף לרשימה ובסיום הורד את כולם כ-ZIP אחד. "שאל" — תפריט קצר בכל קליק.</div>
+      <div class="name" data-i18n="opt.rightclick.action.name">פעולה</div>
+      <div class="hint" data-i18n="opt.rightclick.action.hint">"מיד" — הורד מיד את הקובץ. "תור" — הוסף לרשימה ובסיום הורד את כולם כ-ZIP אחד. "שאל" — תפריט קצר בכל קליק.</div>
     </div>
     <div class="control">
       <div class="radios" data-setting="rightClickBehavior">
-        <label><input type="radio" name="rightClickBehavior" value="immediate">מיד</label>
-        <label><input type="radio" name="rightClickBehavior" value="queue">תור</label>
-        <label><input type="radio" name="rightClickBehavior" value="ask">שאל</label>
+        <label><input type="radio" name="rightClickBehavior" value="immediate"><span data-i18n="opt.rightclick.immediate">מיד</span></label>
+        <label><input type="radio" name="rightClickBehavior" value="queue"><span data-i18n="opt.rightclick.queue">תור</span></label>
+        <label><input type="radio" name="rightClickBehavior" value="ask"><span data-i18n="opt.rightclick.ask">שאל</span></label>
       </div>
     </div>
   </div>
   <div class="row">
     <div class="label">
-      <div class="name">"Save As" בקליק ימני</div>
-      <div class="hint">פתח דיאלוג לבחירת מיקום בכל הורדה דרך קליק ימני (גם כשהטוגל הגלובלי כבוי).</div>
+      <div class="name" data-i18n="opt.rightclick.saveas.name">"Save As" בקליק ימני</div>
+      <div class="hint" data-i18n="opt.rightclick.saveas.hint">פתח דיאלוג לבחירת מיקום בכל הורדה דרך קליק ימני (גם כשהטוגל הגלובלי כבוי).</div>
     </div>
     <div class="control"><input type="checkbox" class="toggle" data-setting="rightClickSaveAs"></div>
   </div>
@@ -522,47 +522,43 @@
 
 <section>
   <h2 data-i18n="opt.section.history">היסטוריה</h2>
-  <p class="desc">כל ההורדות האחרונות — קורסים, קישורים/תמלילים וסרטוני Zoom. לחיצה פותחת שוב את מקור ההורדה כשיש קישור.</p>
+  <p class="desc" data-i18n="opt.history.desc">כל ההורדות האחרונות — קורסים, קישורים/תמלילים וסרטוני Zoom. לחיצה פותחת שוב את מקור ההורדה כשיש קישור.</p>
   <div id="historyContainer">
     <table class="history" id="historyTable"></table>
   </div>
   <div style="margin-top: 12px; display: flex; gap: 8px;">
-    <button class="action secondary" id="clearHistory">נקה היסטוריה</button>
+    <button class="action secondary" id="clearHistory" data-i18n="opt.history.clear">נקה היסטוריה</button>
   </div>
 </section>
 
 <section>
   <h2 data-i18n="opt.section.reset">גיבוי</h2>
-  <p class="desc">איפוס כל ההגדרות לברירת המחדל</p>
+  <p class="desc" data-i18n="opt.reset.desc">איפוס כל ההגדרות לברירת המחדל</p>
   <div class="row">
     <div class="label">
-      <div class="name">איפוס</div>
-      <div class="hint">מאפס את כל ההגדרות לערכי ברירת המחדל. לא משפיע על היסטוריה או מצב diff.</div>
+      <div class="name" data-i18n="opt.reset.name">איפוס</div>
+      <div class="hint" data-i18n="opt.reset.hint">מאפס את כל ההגדרות לערכי ברירת המחדל. לא משפיע על היסטוריה או מצב diff.</div>
     </div>
     <div class="control">
-      <button class="action secondary" id="resetSettings">אפס הגדרות</button>
+      <button class="action secondary" id="resetSettings" data-i18n="opt.reset.btn">אפס הגדרות</button>
     </div>
   </div>
 </section>
 
 <section class="about">
-  <h2>אודות</h2>
-  <p class="about-story">
+  <h2 data-i18n="opt.about.title">אודות</h2>
+  <p class="about-story" data-i18n="opt.about.story">
     Moodle Hoarder נולד מתוך תסכול — חבורת סטודנטים שנמאס להם להוריד כל קובץ
     בנפרד ולהיאבק במודל איטי ומסורבל, החליטו פשוט להפוך אותו לכלי אחד יעיל
     שמוריד את כל הקורס בלחיצה אחת.
   </p>
-  <p class="about-copy">© <span id="aboutYear">2026</span> E.A — כל הזכויות שמורות.</p>
+  <p class="about-copy" id="aboutCopy">© 2026 E.A — כל הזכויות שמורות.</p>
 </section>
 
 </main>
 
 <div id="status" data-i18n="status.saved">נשמר</div>
 
-<script>
-  // Keep the copyright year current without hardcoding it.
-  document.getElementById('aboutYear').textContent = new Date().getFullYear();
-</script>
 <script src="settings.js"></script>
 <script src="i18n.js"></script>
 <script src="options.js"></script>

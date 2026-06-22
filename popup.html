@@ -385,9 +385,9 @@
     </div>
     <div id="queueArea" style="display:none; margin-top:10px;">
       <button id="downloadQueue" style="background: var(--row); color: var(--fg); border: 1px solid var(--border);">
-        <span id="queueCountText">0 פריטים בתור</span> · הורד הכל כ-ZIP
+        <span id="queueCountText">0 פריטים בתור</span><span data-i18n="pop.queue.suffix"> · הורד הכל כ-ZIP</span>
       </button>
-      <a id="clearQueue" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
+      <a id="clearQueue" data-i18n="pop.queue.clear" style="display:block; text-align:center; font-size:11px; color:var(--muted); margin-top:6px; cursor:pointer;">נקה תור</a>
     </div>
   </div>
 
@@ -403,8 +403,8 @@
     <div class="banner" id="diffBanner">
       <div id="diffText"></div>
       <div class="actions">
-        <button class="tiny" id="selOnlyNew">בחר רק חדשים</button>
-        <button class="tiny secondary" id="selAllInBanner">הכל</button>
+        <button class="tiny" id="selOnlyNew" data-i18n="btn.only.new">בחר רק חדשים</button>
+        <button class="tiny secondary" id="selAllInBanner" data-i18n="btn.select.all">הכל</button>
       </div>
     </div>
     <div class="summary"><span class="count" id="selCount">0</span> <span data-i18n="picker.selected.of">מתוך</span> <span id="totCount">0</span> <span data-i18n="picker.selected.suffix">נבחרו</span></div>
@@ -441,7 +441,7 @@
     <div class="summary" id="deadlinesSummary" style="margin-top:4px;"></div>
     <ul class="courses" id="deadlinesList" style="max-height:280px;"></ul>
     <div class="hint" style="margin-top:6px;" data-i18n="deadlines.help.ical">סמן אילו מטלות לכלול בקובץ היומן. אחרי ההורדה — לחיצה כפולה תוסיף אותן ליומן (Google Calendar, Outlook, Apple Calendar).</div>
-    <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
+    <div class="hint" style="margin-top:6px; padding: 6px 8px; background: var(--row); border-radius: 6px;" data-i18n-html="1" data-i18n="pop.deadlines.mycourses.html">💡 כדי להוריד קבצי קורסים — עבור ל<a href="https://moodlearn.ariel.ac.il/my/courses.php" target="_blank" style="color: var(--accent); font-weight: 600;">דף "הקורסים שלי"</a> ולחץ שוב על אייקון התוסף.</div>
     <div class="row-btns">
       <button class="secondary" id="backDeadlines" data-i18n="btn.back">חזור</button>
       <button id="exportDeadlines" data-i18n="btn.export.deadlines">ייצא ליומן</button>
@@ -459,24 +459,24 @@
     <ul class="courses" id="zoomItems"></ul>
     <div class="row-btns" style="flex-wrap:wrap; gap:6px;">
       <button class="secondary" id="backZoom" data-i18n="btn.back">חזור</button>
-      <button id="downloadZoomLinks" style="flex:1; min-width:130px;">📄 קישורים ותמלילים</button>
-      <button id="downloadZoomVideos" style="flex:1; min-width:130px;">🎥 הורד סרטונים (MP4)</button>
+      <button id="downloadZoomLinks" style="flex:1; min-width:130px;" data-i18n="pop.zoom.links">📄 קישורים ותמלילים</button>
+      <button id="downloadZoomVideos" style="flex:1; min-width:130px;" data-i18n="pop.zoom.videos">🎥 הורד סרטונים (MP4)</button>
     </div>
-    <div class="hint" style="margin-top:6px;">קישורים ותמלילים 📄 — ZIP מהיר עם הכל. סרטונים 🎥 — קבצי MP4 של ההקלטות (200MB עד 2GB לכל אחת), ממשיך ברקע גם אחרי סגירה. הווידאו יורד באיכות הגבוהה ביותר ש-Zoom חושף. אם Windows לא מצליח לפתוח — נסה VLC.</div>
+    <div class="hint" style="margin-top:6px;" data-i18n="pop.zoom.hint">קישורים ותמלילים 📄 — ZIP מהיר עם הכל. סרטונים 🎥 — קבצי MP4 של ההקלטות (200MB עד 2GB לכל אחת), ממשיך ברקע גם אחרי סגירה. הווידאו יורד באיכות הגבוהה ביותר ש-Zoom חושף. אם Windows לא מצליח לפתוח — נסה VLC.</div>
     <details class="advanced-debug">
-      <summary>🩺 משהו לא עובד? פתח כלי אבחון</summary>
+      <summary data-i18n="pop.zoom.debug.summary">🩺 משהו לא עובד? פתח כלי אבחון</summary>
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer; color:var(--muted); margin:4px 0 8px;">
         <input type="checkbox" id="zoomDebugNetwork">
-        <span>🎬 תיעוד בקשות רשת לאיתור תקלות (איטי — כ-25 שניות לכל הקלטה)</span>
+        <span data-i18n="pop.zoom.debug.network">🎬 תיעוד בקשות רשת לאיתור תקלות (איטי — כ-25 שניות לכל הקלטה)</span>
       </label>
       <div class="row-btns" style="margin-top:8px;">
-        <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;">🩺 דיאגנוסטיקה קצרה</button>
-        <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;">🔬 מחקר עמוק</button>
+        <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.diagnose">🩺 דיאגנוסטיקה קצרה</button>
+        <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.research">🔬 מחקר עמוק</button>
       </div>
-      <div class="hint" style="margin-top:6px;">פתח רק כשמשהו נכשל. דיאגנוסטיקה — בודקת שלב אחר שלב את כל הצנרת. מחקר עמוק — מקליט trace רשת מלא באמצעות <code dir="ltr">chrome.debugger</code>.</div>
+      <div class="hint" style="margin-top:6px;" data-i18n-html="1" data-i18n="pop.zoom.debug.hint">פתח רק כשמשהו נכשל. דיאגנוסטיקה — בודקת שלב אחר שלב את כל הצנרת. מחקר עמוק — מקליט trace רשת מלא באמצעות <code dir="ltr">chrome.debugger</code>.</div>
       <div id="zoomDiagResult" style="display:none; margin-top:8px;">
         <div style="display:flex; gap:6px; margin-bottom:4px;">
-          <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;">📋 העתק הכל</button>
+          <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.copy">📋 העתק הכל</button>
         </div>
         <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
       </div>

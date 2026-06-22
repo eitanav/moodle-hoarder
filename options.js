@@ -5,25 +5,14 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const DOWNLOAD_HISTORY_KEY = 'downloadHistory';
 
-const FILETYPE_LABELS = {
-  resource:    'קובץ (Resource)',
-  folder:      'תיקייה (Folder)',
-  assign:      'מטלה (Assignment)',
-  url:         'קישור (URL)',
-  page:        'דף (Page)',
-  book:        'ספר (Book)',
-  quiz:        'בוחן (Quiz)',
-  lesson:      'שיעור (Lesson)',
-  forum:       'פורום (Forum)',
-  chat:        'צ׳אט (Chat)',
-  feedback:    'משוב (Feedback)',
-  choice:      'בחירה (Choice)',
-  wiki:        'ויקי (Wiki)',
-  glossary:    'מילון (Glossary)',
-  workshop:    'סדנה (Workshop)',
-  scorm:       'SCORM',
-  h5pactivity: 'H5P',
-};
+// Activity types shown in the file-type picker. Labels resolve through
+// i18n at render time (key `ft.<type>`), so they re-translate on language
+// switch like everything else.
+const FILETYPE_KEYS = [
+  'resource', 'folder', 'assign', 'url', 'page', 'book', 'quiz', 'lesson',
+  'forum', 'chat', 'feedback', 'choice', 'wiki', 'glossary', 'workshop',
+  'scorm', 'h5pactivity',
+];
 
 function flashSaved() {
   const el = $('#status');
@@ -76,11 +65,11 @@ function bindRadios(container, key, settings, onChange) {
 function renderFileTypes(settings) {
   const wrap = $('#fileTypes');
   wrap.innerHTML = '';
-  for (const [type, label] of Object.entries(FILETYPE_LABELS)) {
+  for (const type of FILETYPE_KEYS) {
     const enabled = settings.fileTypes[type] !== false;
     const lbl = document.createElement('label');
     lbl.innerHTML = `<input type="checkbox" ${enabled ? 'checked' : ''}> <span></span>`;
-    lbl.querySelector('span').textContent = label;
+    lbl.querySelector('span').textContent = t(`ft.${type}`);
     const checkbox = lbl.querySelector('input');
     checkbox.addEventListener('change', async () => {
       const s = await getSettings();
@@ -102,15 +91,19 @@ function formatBytes(n) {
 
 function historyTypeLabel(type) {
   return ({
-    course: 'קורס ZIP',
-    'zoom-links': 'Zoom קישורים/תמלילים',
-    'zoom-videos': 'Zoom סרטונים',
-    legacySeen: 'קורס (Diff ישן)',
-  })[type] || type || 'הורדה';
+    course: t('opt.history.type.course'),
+    'zoom-links': t('opt.history.type.zoomlinks'),
+    'zoom-videos': t('opt.history.type.zoomvideos'),
+    legacySeen: t('opt.history.type.legacy'),
+  })[type] || type || t('opt.history.fallback');
 }
 
 function historyStatusLabel(status) {
-  return ({ success: 'הצליח', partial: 'חלקי', failed: 'נכשל' })[status] || '—';
+  return ({
+    success: t('opt.history.status.success'),
+    partial: t('opt.history.status.partial'),
+    failed: t('opt.history.status.failed'),
+  })[status] || '—';
 }
 
 async function renderHistory() {
@@ -126,7 +119,7 @@ async function renderHistory() {
     entries.push({
       id: `legacy_${courseId}`,
       type: 'legacySeen',
-      title: value.courseName || `קורס ${courseId}`,
+      title: value.courseName || t('opt.history.legacy.course', { id: courseId }),
       courseId,
       sourceUrl: value.courseUrl || `https://moodlearn.ariel.ac.il/course/view.php?id=${encodeURIComponent(courseId)}`,
       finishedAt: value.lastDownload || 0,
@@ -141,36 +134,47 @@ async function renderHistory() {
 
   const table = $('#historyTable');
   if (!entries.length) {
-    table.innerHTML = `<tr><td class="empty">עוד לא הורדת אף קורס או הקלטה</td></tr>`;
+    table.innerHTML = `<tr><td class="empty">${escapeHtml(t('opt.history.empty'))}</td></tr>`;
     return;
   }
+  const locale = (typeof MH_CURRENT_LANG !== 'undefined' && MH_CURRENT_LANG === 'en') ? 'en-US' : 'he-IL';
   const head = `
     <thead><tr>
-      <th>הורדה</th>
-      <th>סוג</th>
-      <th>פריטים</th>
-      <th>סטטוס</th>
-      <th>גודל</th>
-      <th>תאריך</th>
-      <th>פעולה</th>
+      <th>${escapeHtml(t('opt.history.col.download'))}</th>
+      <th>${escapeHtml(t('opt.history.col.type'))}</th>
+      <th>${escapeHtml(t('opt.history.col.items'))}</th>
+      <th>${escapeHtml(t('opt.history.col.status'))}</th>
+      <th>${escapeHtml(t('opt.history.col.size'))}</th>
+      <th>${escapeHtml(t('opt.history.col.date'))}</th>
+      <th>${escapeHtml(t('opt.history.col.action'))}</th>
     </tr></thead>`;
   const rows = entries.slice(0, 200).map(e => {
     const total = e.itemCount ?? e.successCount ?? 0;
-    const counts = e.failedCount ? `${e.successCount || 0}/${total} (${e.failedCount} נכשלו)` : String(total || '—');
+    const counts = e.failedCount
+      ? t('opt.history.counts', { ok: e.successCount || 0, total, failed: e.failedCount })
+      : String(total || '—');
     const url = e.sourceUrl || (e.courseId ? `https://moodlearn.ariel.ac.il/course/view.php?id=${encodeURIComponent(e.courseId)}` : '');
-    const action = url ? `<a href="${escapeHtml(url)}" target="_blank" style="color: var(--accent);">פתח</a>` : '—';
+    const action = url ? `<a href="${escapeHtml(url)}" target="_blank" style="color: var(--accent);">${escapeHtml(t('opt.history.open'))}</a>` : '—';
     return `
       <tr>
-        <td>${escapeHtml(e.title || e.filename || 'הורדה')}</td>
+        <td>${escapeHtml(e.title || e.filename || t('opt.history.fallback'))}</td>
         <td>${escapeHtml(historyTypeLabel(e.type))}</td>
         <td>${escapeHtml(counts)}</td>
         <td>${escapeHtml(historyStatusLabel(e.status))}</td>
         <td>${formatBytes(e.bytes)}</td>
-        <td>${e.finishedAt || e.startedAt ? new Date(e.finishedAt || e.startedAt).toLocaleString('he-IL') : '—'}</td>
+        <td>${e.finishedAt || e.startedAt ? new Date(e.finishedAt || e.startedAt).toLocaleString(locale) : '—'}</td>
         <td>${action}</td>
       </tr>`;
   }).join('');
   table.innerHTML = head + '<tbody>' + rows + '</tbody>';
+}
+
+// Strings that aren't bound via [data-i18n] in the HTML (built in JS or
+// needing a runtime value like the year). Safe to call repeatedly — runs
+// on init and again whenever the UI language changes.
+function applyDynamicI18n() {
+  const copy = $('#aboutCopy');
+  if (copy) copy.textContent = t('opt.about.copy', { year: new Date().getFullYear() });
 }
 
 function escapeHtml(s) {
@@ -187,6 +191,7 @@ function escapeHtml(s) {
   if (typeof applyLanguage === 'function') {
     applyLanguage(resolveLanguage(settings.uiLanguage, null));
   }
+  applyDynamicI18n();
 
   // toggles
   for (const input of $$('input.toggle')) {
@@ -208,8 +213,15 @@ function escapeHtml(s) {
     else if (key === 'uiLanguage') {
       // Live re-translate when the user picks a different language. 'auto'
       // resolves against navigator.language here (no active Moodle tab in
-      // the options page).
-      onChange = (v) => applyLanguage(resolveLanguage(v, null));
+      // the options page). Re-render the JS-built bits (file types, history,
+      // about line) so they switch language too — not just [data-i18n] nodes.
+      onChange = async (v) => {
+        applyLanguage(resolveLanguage(v, null));
+        applyDynamicI18n();
+        const s = await getSettings();
+        renderFileTypes(s);
+        await renderHistory();
+      };
     }
     bindRadios(wrap, key, settings, onChange);
   }
@@ -218,7 +230,7 @@ function escapeHtml(s) {
   await renderHistory();
 
   $('#clearHistory').addEventListener('click', async () => {
-    if (!confirm('למחוק את כל היסטוריית הקורסים שהורדת? (לא ימחק קבצים שכבר ירדו)')) return;
+    if (!confirm(t('opt.history.clear.confirm'))) return;
     const stored = await chrome.storage.local.get(null);
     const toRemove = Object.keys(stored).filter(k => k.startsWith('seen_'));
     toRemove.push(DOWNLOAD_HISTORY_KEY);
@@ -228,7 +240,7 @@ function escapeHtml(s) {
   });
 
   $('#resetSettings').addEventListener('click', async () => {
-    if (!confirm('לאפס את כל ההגדרות לברירת המחדל?')) return;
+    if (!confirm(t('opt.reset.confirm'))) return;
     await resetSettings();
     // reload UI
     location.reload();
