@@ -60,7 +60,12 @@ async function mhCheckForUpdate(force = false) {
   }
 
   try {
-    const res = await fetch(MH_UPDATE_MANIFEST_URL, { cache: 'no-store' });
+    // Cache-busting query param: raw.githubusercontent is served via a CDN that
+    // caches for ~5 min, so a plain fetch can return a stale version right after
+    // a push. A unique URL forces a fresh read. `cache: no-store` also bypasses
+    // the browser's own HTTP cache.
+    const url = MH_UPDATE_MANIFEST_URL + '?cb=' + Date.now();
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const latest = data.version || current;
