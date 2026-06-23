@@ -4,6 +4,14 @@
 
 ---
 
+## v2.8.3 — הפעלת כפתור התרומה (Ko-fi)
+
+- **`updates.js`** — הוגדר `MH_DONATE_URL` ל-`https://ko-fi.com/moodlehoarder`
+  (Buy Me a Coffee לא תומך ב-payouts בישראל, אז Ko-fi עם PayPal). הכפתור
+  "☕ קנה לי קפה / תודה" מופיע כעת בדף ההגדרות מתחת למונה "כמה זמן חסכת".
+
+---
+
 ## v2.8.2 — תיקון: בדיקת עדכון לא ראתה גרסה חדשה בגלל cache של GitHub
 
 **הבעיה:** מיד אחרי push, raw.githubusercontent מגיש את ה-manifest מ-CDN שמטמין

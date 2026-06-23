@@ -16,9 +16,9 @@ const MH_REPO_URL = 'https://github.com/eitanav/moodle-hoarder';
 const MH_CHANGELOG_URL = 'https://github.com/eitanav/moodle-hoarder/blob/main/CHANGELOG.md';
 
 // Optional "Buy Me a Coffee" (or any donation) link. Leave empty to hide the
-// donate button entirely. To enable: create a page at buymeacoffee.com, then
-// paste your URL here, e.g. 'https://www.buymeacoffee.com/yourhandle'.
-const MH_DONATE_URL = '';
+// donate button entirely. Ko-fi is used here (Buy Me a Coffee isn't available
+// for payouts in Israel); the button text stays "Buy me a coffee".
+const MH_DONATE_URL = 'https://ko-fi.com/moodlehoarder';
 const MH_UPDATE_CHECK_KEY = 'updateCheck';
 const MH_UPDATE_THROTTLE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
