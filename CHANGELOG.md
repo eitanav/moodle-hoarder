@@ -4,6 +4,31 @@
 
 ---
 
+## v2.7.6 — תיקון הרשאת debugger + כפתור "רענן עכשיו" לעדכון
+
+**שני דברים:**
+
+1. **תיקון warning:** `Permission 'debugger' cannot be listed as optional` —
+   מסתבר ש-Chrome **לא מאפשר** את `debugger` כהרשאה אופציונלית (משמיט אותה). לכן
+   הוחזרה ל-`permissions` הרגילות. בהתקנת unpacked זה תקין — הבאנר "started
+   debugging" מופיע רק כשמפעילים בפועל את כלי האבחון. (רלוונטי כחסם רק ל-Web Store,
+   ושם ממילא צריך להסיר את הפיצ'ר — מתועד ב-ROADMAP-PRO.)
+   - `manifest.json` — `debugger` חזרה ל-`permissions`, הוסר `optional_permissions`
+   - `popup.js` — `ensureDebuggerPermission()` נשאר כ-guard (מחזיר true כשהרשאה קיימת)
+
+2. **כפתור "🔄 רענן עכשיו":** מאחר שתוסף unpacked לא יכול לעדכן את הקוד שלו לבד,
+   אבל `chrome.runtime.reload()` קורא מחדש את הקבצים מהדיסק — נוסף כפתור שמבצע
+   רענון בלחיצה אחת אחרי `update.bat`, בלי לנווט ל-`chrome://extensions` ולחפש את
+   אייקון הרענון. זרימת העדכון עכשיו: (1) update.bat → (2) "🔄 רענן עכשיו".
+   - `updates.js` — `mhReloadExtension()`
+   - `popup.html`/`options.html` — כפתור רענון בבאנר העדכון
+   - `i18n.js` — `opt.updates.reloadnow` + עדכון טקסטי ההסבר בשתי השפות
+
+> הערה: עדכון **אוטומטי לחלוטין** (כולל ה-git pull) לא אפשרי בתוסף unpacked בלי
+> native messaging host — חורג מההיקף הנוכחי. ה"רענן עכשיו" הוא הקירוב הכי טוב.
+
+---
+
 ## v2.7.5 — כפתור "תודה / Buy Me a Coffee" (אופציונלי)
 
 החלטת מדיניות: הכלי יישאר חינמי לעד וללא פרסומות; המונטיזציה היחידה היא כפתור

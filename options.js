@@ -303,6 +303,7 @@ function escapeHtml(s) {
   const cv = $('#currentVersion');
   if (cv && typeof mhCurrentVersion === 'function') cv.textContent = 'v' + mhCurrentVersion();
   $('#updateOpenExt')?.addEventListener('click', () => { if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage(); });
+  $('#updateReloadNow')?.addEventListener('click', () => { if (typeof mhReloadExtension === 'function') mhReloadExtension(); });
   $('#checkUpdateNow')?.addEventListener('click', async () => {
     const result = $('#updateCheckResult');
     if (result) result.textContent = t('opt.updates.checking');

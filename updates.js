@@ -80,6 +80,15 @@ async function mhCheckForUpdate(force = false) {
   }
 }
 
+// Reload the extension. For an unpacked extension this re-reads the files from
+// disk — so AFTER update.bat (git pull) has refreshed the files, this single
+// click picks up the new version without visiting chrome://extensions. It does
+// NOT pull code itself (an extension can't run git / overwrite its own files);
+// update.bat still does the download step.
+function mhReloadExtension() {
+  try { chrome.runtime.reload(); } catch {}
+}
+
 // Open the extension's own card in chrome://extensions so the user can hit the
 // Reload icon after running update.bat. Opening chrome:// pages from a tab is
 // allowed for chrome://extensions.
@@ -96,6 +105,7 @@ if (typeof self !== 'undefined') {
   self.mhCheckForUpdate = mhCheckForUpdate;
   self.mhCompareVersions = mhCompareVersions;
   self.mhCurrentVersion = mhCurrentVersion;
+  self.mhReloadExtension = mhReloadExtension;
   self.mhOpenExtensionsPage = mhOpenExtensionsPage;
   self.MH_UPDATE_MANIFEST_URL = MH_UPDATE_MANIFEST_URL;
   self.MH_REPO_URL = MH_REPO_URL;

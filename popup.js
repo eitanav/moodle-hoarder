@@ -277,6 +277,9 @@ async function maybeShowUpdateBanner() {
   document.getElementById('updateOpenExt')?.addEventListener('click', () => {
     if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage();
   });
+  document.getElementById('updateReloadNow')?.addEventListener('click', () => {
+    if (typeof mhReloadExtension === 'function') mhReloadExtension();
+  });
 }
 
 // Dashboard scan: shared between auto-bootstrap and the manual scan button
@@ -1792,10 +1795,10 @@ $('zoomDiagCopy')?.addEventListener('click', async () => {
   }
 });
 
-// The `debugger` permission is OPTIONAL (it's only needed for the advanced
-// Zoom diagnostics, and required-debugger scares users + Chrome Web Store
-// review). Request it on demand, from the click's user gesture. Returns true
-// once the API is available.
+// The Zoom diagnostics need the `debugger` permission. Chrome does NOT allow
+// `debugger` to be an optional permission (it gets silently dropped), so it's
+// a required permission and chrome.debugger is normally present. This stays as
+// a guard: if for any reason it's missing, fail gracefully instead of throwing.
 async function ensureDebuggerPermission() {
   if (chrome.debugger) return true;
   try {

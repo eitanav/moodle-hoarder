@@ -301,10 +301,11 @@ const MH_STRINGS = {
     'opt.updates.uptodate': '✅ אתה מעודכן (גרסה {v})',
     'opt.updates.available': '🆕 גרסה חדשה {v} זמינה!',
     'opt.updates.failed': '⚠️ בדיקת העדכון נכשלה — בדוק חיבור לאינטרנט.',
-    'opt.updates.howto': 'כדי לעדכן: הרץ <code>update.bat</code> בתיקיית התוסף, ואז לחץ על אייקון ה-Reload בדף התוספים.',
+    'opt.updates.howto': 'כדי לעדכן: (1) הרץ <code>update.bat</code> בתיקיית התוסף כדי להוריד את הגרסה החדשה, ואז (2) לחץ <strong>🔄 רענן עכשיו</strong>.',
     'opt.updates.openext': 'פתח דף תוספים',
+    'opt.updates.reloadnow': '🔄 רענן עכשיו',
     'opt.updates.changelog': 'מה חדש',
-    'pop.update.available': '🆕 גרסה חדשה {v} זמינה — הרץ update.bat ואז Reload בדף התוספים.',
+    'pop.update.available': '🆕 גרסה חדשה {v} זמינה — הרץ update.bat ואז לחץ 🔄 רענן עכשיו.',
 
     // ----- First-run disclaimer / consent -----
     'disc.title': 'לפני שמתחילים',
@@ -583,10 +584,11 @@ const MH_STRINGS = {
     'opt.updates.uptodate': '✅ You’re up to date (v{v})',
     'opt.updates.available': '🆕 New version {v} available!',
     'opt.updates.failed': '⚠️ Update check failed — check your connection.',
-    'opt.updates.howto': 'To update: run <code>update.bat</code> in the extension folder, then click the Reload icon on the extensions page.',
+    'opt.updates.howto': 'To update: (1) run <code>update.bat</code> in the extension folder to download the new version, then (2) click <strong>🔄 Reload now</strong>.',
     'opt.updates.openext': 'Open extensions page',
+    'opt.updates.reloadnow': '🔄 Reload now',
     'opt.updates.changelog': 'What’s new',
-    'pop.update.available': '🆕 New version {v} available — run update.bat then Reload on the extensions page.',
+    'pop.update.available': '🆕 New version {v} available — run update.bat then click 🔄 Reload now.',
 
     // ----- First-run disclaimer / consent -----
     'disc.title': 'Before you start',
