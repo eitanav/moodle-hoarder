@@ -24,6 +24,10 @@ build/
 node_modules/
 package-lock.json
 
+# Native messaging host manifest — generated per-machine by install.bat
+# (contains an absolute path), so it must not be committed.
+native-host/com.moodle_hoarder.updater.json
+
 # Local secrets
 .env
 .env.local

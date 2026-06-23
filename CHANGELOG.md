@@ -4,6 +4,30 @@
 
 ---
 
+## v2.8.0 — עדכון בלחיצה (Native Messaging Host)
+
+מאחר שתוסף Chrome לא יכול לכתוב על הקבצים של עצמו, נוסף **native messaging host**
+קטן שמאפשר לכפתור "⬇️ עדכן עכשיו" בתוך התוסף להריץ `git pull` ברקע — ואז רק
+"🔄 רענן עכשיו". בלי לפתוח update.bat ידנית בכל פעם.
+
+- **חדש `native-host/`** — `mh_updater.py` (host שמריץ `git fetch` + `reset --hard
+  origin/main`), `mh_updater.bat` (launcher), `install.bat`/`uninstall.bat`
+  (רישום ה-host ב-Registry של Chrome/Edge/Brave, פעם אחת), ו-README.
+- **`manifest.json`** — נוספה הרשאת `nativeMessaging`, ונוסף `key` כדי **לקבע את
+  ה-ID של התוסף** (`najfelnccehphphopjpgeomihocoinfk`) — חובה כדי שה-host יוכל
+  לזהות בדיוק את התוסף הזה.
+- **`updates.js`** — `mhNativeUpdate()` (שולח `{cmd:'update'}` ל-host).
+- **`popup.html`/`options.html`/`popup.js`/`options.js`** — כפתור "⬇️ עדכן עכשיו"
+  בבאנר העדכון, עם שורת סטטוס: מצליח / כבר מעודכן / נכשל / "צריך התקנה חד-פעמית".
+- **`PRIVACY.md`** — תועדה הרשאת `nativeMessaging` (רץ מקומית, לא שולח מידע).
+
+> ⚠️ **חד-פעמי בעדכון הזה:** הוספת ה-`key` **משנה את ה-ID של התוסף**. בעקבות זה,
+> בטעינה מחדש ההגדרות/היסטוריה עשויות להתאפס (chrome.storage לפי ID), ויכול
+> להופיע ערך כפול ישן ב-chrome://extensions שאפשר להסיר. קורה פעם אחת בלבד.
+> כדי להפעיל את העדכון בלחיצה: הרץ פעם אחת את `native-host/install.bat`.
+
+---
+
 ## v2.7.7 — הסרת מסמך תכנון פנימי + bump לבדיקת העדכון האוטומטי
 
 - הוסר מסמך תכנון פנימי מהריפו (ומההיסטוריה) כעת כשהריפו ציבורי.

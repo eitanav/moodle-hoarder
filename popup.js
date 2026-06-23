@@ -280,6 +280,24 @@ async function maybeShowUpdateBanner() {
   document.getElementById('updateReloadNow')?.addEventListener('click', () => {
     if (typeof mhReloadExtension === 'function') mhReloadExtension();
   });
+  document.getElementById('updateRunNow')?.addEventListener('click', async () => {
+    const status = document.getElementById('updateBannerStatus');
+    const btn = document.getElementById('updateRunNow');
+    if (btn) btn.disabled = true;
+    if (status) status.innerHTML = t('opt.updates.updating');
+    const res = (typeof mhNativeUpdate === 'function') ? await mhNativeUpdate() : { ok: false, error: 'host-missing' };
+    if (btn) btn.disabled = false;
+    if (!status) return;
+    if (res.ok) {
+      status.innerHTML = res.updated
+        ? t('opt.updates.updated', { v: res.after || '' })
+        : t('opt.updates.alreadylatest', { v: res.after || mhCurrentVersion() });
+    } else if (res.error === 'host-missing') {
+      status.innerHTML = t('opt.updates.nohost');
+    } else {
+      status.innerHTML = t('opt.updates.updatefailed', { msg: res.error || res.detail || '' });
+    }
+  });
 }
 
 // Dashboard scan: shared between auto-bootstrap and the manual scan button

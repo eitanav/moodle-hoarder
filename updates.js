@@ -80,11 +80,32 @@ async function mhCheckForUpdate(force = false) {
   }
 }
 
+// Name of the native messaging host (registered once by native-host/install.bat).
+const MH_NATIVE_HOST = 'com.moodle_hoarder.updater';
+
+// Ask the native host to pull the new version from GitHub onto disk. A Chrome
+// extension can't write its own files, so this is the only way to update the
+// code in place (short of the Web Store). Never throws; resolves to a result
+// object. If the host isn't installed, error === 'host-missing'.
+function mhNativeUpdate() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(MH_NATIVE_HOST, { cmd: 'update' }, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: 'host-missing', detail: chrome.runtime.lastError.message });
+        } else {
+          resolve(resp || { ok: false, error: 'no-response' });
+        }
+      });
+    } catch (e) {
+      resolve({ ok: false, error: 'host-missing', detail: String(e) });
+    }
+  });
+}
+
 // Reload the extension. For an unpacked extension this re-reads the files from
-// disk — so AFTER update.bat (git pull) has refreshed the files, this single
-// click picks up the new version without visiting chrome://extensions. It does
-// NOT pull code itself (an extension can't run git / overwrite its own files);
-// update.bat still does the download step.
+// disk — so AFTER the native host (or update.bat) has refreshed the files, this
+// single click picks up the new version without visiting chrome://extensions.
 function mhReloadExtension() {
   try { chrome.runtime.reload(); } catch {}
 }
@@ -105,8 +126,10 @@ if (typeof self !== 'undefined') {
   self.mhCheckForUpdate = mhCheckForUpdate;
   self.mhCompareVersions = mhCompareVersions;
   self.mhCurrentVersion = mhCurrentVersion;
+  self.mhNativeUpdate = mhNativeUpdate;
   self.mhReloadExtension = mhReloadExtension;
   self.mhOpenExtensionsPage = mhOpenExtensionsPage;
+  self.MH_NATIVE_HOST = MH_NATIVE_HOST;
   self.MH_UPDATE_MANIFEST_URL = MH_UPDATE_MANIFEST_URL;
   self.MH_REPO_URL = MH_REPO_URL;
   self.MH_CHANGELOG_URL = MH_CHANGELOG_URL;

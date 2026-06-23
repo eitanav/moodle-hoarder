@@ -237,6 +237,27 @@ function showUpdateResult(info, { showResultLine = true } = {}) {
   }
 }
 
+// Trigger the native-host update (git pull on disk), then report the result.
+// statusSel / btnSel are CSS selectors for the status element and the button.
+async function runNativeUpdate(statusSel, btnSel) {
+  const status = $(statusSel);
+  const btn = $(btnSel);
+  if (btn) btn.disabled = true;
+  if (status) status.innerHTML = t('opt.updates.updating');
+  const res = (typeof mhNativeUpdate === 'function') ? await mhNativeUpdate() : { ok: false, error: 'host-missing' };
+  if (btn) btn.disabled = false;
+  if (!status) return;
+  if (res.ok) {
+    status.innerHTML = res.updated
+      ? t('opt.updates.updated', { v: res.after || '' })
+      : t('opt.updates.alreadylatest', { v: res.after || mhCurrentVersion() });
+  } else if (res.error === 'host-missing') {
+    status.innerHTML = t('opt.updates.nohost');
+  } else {
+    status.innerHTML = t('opt.updates.updatefailed', { msg: res.error || res.detail || '' });
+  }
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
@@ -304,6 +325,7 @@ function escapeHtml(s) {
   if (cv && typeof mhCurrentVersion === 'function') cv.textContent = 'v' + mhCurrentVersion();
   $('#updateOpenExt')?.addEventListener('click', () => { if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage(); });
   $('#updateReloadNow')?.addEventListener('click', () => { if (typeof mhReloadExtension === 'function') mhReloadExtension(); });
+  $('#updateRunNow')?.addEventListener('click', () => runNativeUpdate('#updateBannerStatus', '#updateRunNow'));
   $('#checkUpdateNow')?.addEventListener('click', async () => {
     const result = $('#updateCheckResult');
     if (result) result.textContent = t('opt.updates.checking');
