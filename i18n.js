@@ -245,6 +245,7 @@ const MH_STRINGS = {
     'opt.about.story': 'Moodle Hoarder נולד מתוך תסכול — חבורת סטודנטים שנמאס להם להוריד כל קובץ בנפרד ולהיאבק במודל איטי ומסורבל, החליטו פשוט להפוך אותו לכלי אחד יעיל שמוריד את כל הקורס בלחיצה אחת.',
     'opt.about.copy': '© {year} E.A — כל הזכויות שמורות.',
     'opt.about.feedback': 'דיווח על באג או הצעה לשיפור',
+    'opt.about.donate': '☕ קנה לי קפה / תודה',
 
     // Activity type labels (options page file-type picker)
     'ft.resource': 'קובץ (Resource)',
@@ -526,6 +527,7 @@ const MH_STRINGS = {
     'opt.about.story': 'Moodle Hoarder was born out of frustration — a bunch of students fed up with downloading every file one by one and fighting a slow, clunky Moodle decided to simply turn it into one efficient tool that grabs the whole course in a single click.',
     'opt.about.copy': '© {year} E.A — all rights reserved.',
     'opt.about.feedback': 'Report a bug or suggest an improvement',
+    'opt.about.donate': '☕ Buy me a coffee',
 
     // Activity type labels (options page file-type picker)
     'ft.resource': 'File (Resource)',

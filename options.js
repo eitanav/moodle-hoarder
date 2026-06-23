@@ -292,6 +292,13 @@ function escapeHtml(s) {
   await renderHistory();
   await renderStats();
 
+  // Donation button — only shown once MH_DONATE_URL is configured in updates.js.
+  const donate = $('#donateBtn');
+  if (donate && typeof MH_DONATE_URL === 'string' && MH_DONATE_URL.trim()) {
+    donate.href = MH_DONATE_URL.trim();
+    donate.style.display = 'inline-block';
+  }
+
   // ----- Updates -----
   const cv = $('#currentVersion');
   if (cv && typeof mhCurrentVersion === 'function') cv.textContent = 'v' + mhCurrentVersion();

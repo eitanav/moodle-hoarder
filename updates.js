@@ -14,6 +14,11 @@
 const MH_UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/eitanav/moodle-hoarder/main/manifest.json';
 const MH_REPO_URL = 'https://github.com/eitanav/moodle-hoarder';
 const MH_CHANGELOG_URL = 'https://github.com/eitanav/moodle-hoarder/blob/main/CHANGELOG.md';
+
+// Optional "Buy Me a Coffee" (or any donation) link. Leave empty to hide the
+// donate button entirely. To enable: create a page at buymeacoffee.com, then
+// paste your URL here, e.g. 'https://www.buymeacoffee.com/yourhandle'.
+const MH_DONATE_URL = '';
 const MH_UPDATE_CHECK_KEY = 'updateCheck';
 const MH_UPDATE_THROTTLE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -95,4 +100,5 @@ if (typeof self !== 'undefined') {
   self.MH_UPDATE_MANIFEST_URL = MH_UPDATE_MANIFEST_URL;
   self.MH_REPO_URL = MH_REPO_URL;
   self.MH_CHANGELOG_URL = MH_CHANGELOG_URL;
+  self.MH_DONATE_URL = MH_DONATE_URL;
 }

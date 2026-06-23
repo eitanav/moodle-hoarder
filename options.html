@@ -329,6 +329,18 @@
   }
   .stats-card .sub { font-size: 13px; color: var(--fg); margin: 0 0 6px; }
   .stats-card .note { font-size: 11px; color: var(--muted); margin: 0; }
+  .donate-btn {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: #ffdd00;
+    color: #000;
+    font-weight: 700;
+    font-size: 13px;
+    border-radius: 8px;
+    text-decoration: none;
+  }
+  .donate-btn:hover { filter: brightness(0.95); }
 
   /* Update banner (top of page) */
   .update-banner {
@@ -373,6 +385,7 @@
 <section class="stats">
   <h2 data-i18n="opt.section.stats">כמה זמן חסכתי לך</h2>
   <div class="stats-card" id="statsCard"></div>
+  <a id="donateBtn" class="donate-btn" href="#" target="_blank" rel="noopener" style="display:none;" data-i18n="opt.about.donate">☕ קנה לי קפה / תודה</a>
 </section>
 
 <section>
