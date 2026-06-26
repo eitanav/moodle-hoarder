@@ -258,6 +258,57 @@ async function runNativeUpdate(statusSel, btnSel) {
   }
 }
 
+// Send feedback through Web3Forms (configured via MH_FEEDBACK_KEY). The owner's
+// email is never in the code — Web3Forms maps the anonymous key to it. Falls
+// back to a GitHub Issues link if the key isn't set or the request fails.
+async function sendFeedback() {
+  const msgEl = $('#feedbackMessage');
+  const status = $('#feedbackStatus');
+  const btn = $('#feedbackSend');
+  const issues = (typeof MH_ISSUES_URL === 'string' && MH_ISSUES_URL)
+    ? MH_ISSUES_URL : 'https://github.com/eitanav/moodle-hoarder/issues';
+  const githubLink = ` <a href="${issues}" target="_blank">${escapeHtml(t('opt.feedback.github'))}</a>`;
+  const msg = (msgEl && msgEl.value || '').trim();
+  if (!msg) { if (status) status.textContent = t('opt.feedback.empty'); return; }
+  if (typeof MH_FEEDBACK_KEY !== 'string' || !MH_FEEDBACK_KEY.trim()) {
+    if (status) status.innerHTML = escapeHtml(t('opt.feedback.notset')) + githubLink;
+    return;
+  }
+  const type = ($('#feedbackType') && $('#feedbackType').value) || 'other';
+  const contact = ($('#feedbackContact') && $('#feedbackContact').value || '').trim();
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = t('opt.feedback.sending');
+  try {
+    const res = await fetch(MH_FEEDBACK_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        access_key: MH_FEEDBACK_KEY.trim(),
+        subject: `Moodle Hoarder feedback [${type}] v${mhCurrentVersion()}`,
+        from_name: 'Moodle Hoarder',
+        message: msg,
+        feedback_type: type,
+        contact: contact || '(none)',
+        version: mhCurrentVersion(),
+        language: (typeof MH_CURRENT_LANG !== 'undefined' ? MH_CURRENT_LANG : ''),
+        botcheck: '',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data && data.success) {
+      if (status) status.textContent = t('opt.feedback.sent');
+      if (msgEl) msgEl.value = '';
+      const c = $('#feedbackContact'); if (c) c.value = '';
+    } else {
+      if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed')) + githubLink;
+    }
+  } catch {
+    if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed')) + githubLink;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
@@ -319,6 +370,8 @@ function escapeHtml(s) {
     donate.href = MH_DONATE_URL.trim();
     donate.style.display = 'inline-block';
   }
+
+  $('#feedbackSend')?.addEventListener('click', sendFeedback);
 
   // ----- Updates -----
   const cv = $('#currentVersion');

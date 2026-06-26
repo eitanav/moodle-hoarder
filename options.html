@@ -342,6 +342,25 @@
   }
   .donate-btn:hover { filter: brightness(0.95); }
 
+  /* Feedback form */
+  .fb-form { display: flex; flex-direction: column; gap: 10px; max-width: 520px; }
+  .fb-row { display: flex; align-items: center; gap: 10px; }
+  .fb-label { font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .fb-form select, .fb-form textarea, .fb-form input[type="email"] {
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--fg);
+    width: 100%;
+  }
+  .fb-form textarea { resize: vertical; min-height: 80px; }
+  .fb-actions { display: flex; align-items: center; gap: 12px; }
+  .fb-status { font-size: 12px; color: var(--muted); }
+  .fb-status a { color: var(--accent); }
+
   /* Update banner (top of page) */
   .update-banner {
     background: var(--row);
@@ -635,6 +654,27 @@
   <div class="hint" id="updateCheckResult" style="margin-top:8px;"></div>
 </section>
 
+<section class="feedback">
+  <h2 data-i18n="opt.section.feedback">💬 פידבק והצעות</h2>
+  <p class="desc" data-i18n="opt.feedback.desc">מצאת באג? יש לך רעיון לפיצ׳ר? כתוב לי כאן וזה יגיע אליי ישירות.</p>
+  <div class="fb-form">
+    <div class="fb-row">
+      <label class="fb-label" for="feedbackType" data-i18n="opt.feedback.type.label">סוג</label>
+      <select id="feedbackType">
+        <option value="bug" data-i18n="opt.feedback.type.bug">🐞 באג</option>
+        <option value="feature" data-i18n="opt.feedback.type.feature">💡 הצעת פיצ׳ר</option>
+        <option value="other" data-i18n="opt.feedback.type.other">💬 אחר</option>
+      </select>
+    </div>
+    <textarea id="feedbackMessage" rows="4" data-i18n-attr="placeholder:opt.feedback.message.ph" placeholder="כתוב כאן את ההודעה…"></textarea>
+    <input type="email" id="feedbackContact" data-i18n-attr="placeholder:opt.feedback.contact.ph" placeholder="מייל לחזרה (לא חובה)">
+    <div class="fb-actions">
+      <button class="action" id="feedbackSend" data-i18n="opt.feedback.send">שלח</button>
+      <span class="fb-status" id="feedbackStatus"></span>
+    </div>
+  </div>
+</section>
+
 <section class="about">
   <h2 data-i18n="opt.about.title">אודות</h2>
   <p class="about-story" data-i18n="opt.about.story">
@@ -643,7 +683,6 @@
     שמוריד את כל הקורס בלחיצה אחת.
   </p>
   <p class="about-copy" id="aboutCopy">© 2026 E.A — כל הזכויות שמורות.</p>
-  <p class="about-copy" style="margin-top:8px;"><a href="https://github.com/eitanav/moodle-hoarder/issues" target="_blank" style="color: var(--accent);" data-i18n="opt.about.feedback">דיווח על באג או הצעה לשיפור</a></p>
 </section>
 
 </main>

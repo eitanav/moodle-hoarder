@@ -19,6 +19,15 @@ const MH_CHANGELOG_URL = 'https://github.com/eitanav/moodle-hoarder/blob/main/CH
 // donate button entirely. Ko-fi is used here (Buy Me a Coffee isn't available
 // for payouts in Israel); the button text stays "Buy me a coffee".
 const MH_DONATE_URL = 'https://ko-fi.com/moodlehoarder';
+
+// Web3Forms access key for the in-extension feedback form. The key is an
+// anonymous UUID tied (on Web3Forms' side) to the owner's email — the email
+// itself never appears in this code. Get a key in 1 minute at web3forms.com
+// (enter your email, copy the key) and paste it here. Leave empty to fall back
+// to the GitHub Issues link.
+const MH_FEEDBACK_KEY = '';
+const MH_FEEDBACK_ENDPOINT = 'https://api.web3forms.com/submit';
+const MH_ISSUES_URL = 'https://github.com/eitanav/moodle-hoarder/issues';
 const MH_UPDATE_CHECK_KEY = 'updateCheck';
 const MH_UPDATE_THROTTLE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -139,4 +148,7 @@ if (typeof self !== 'undefined') {
   self.MH_REPO_URL = MH_REPO_URL;
   self.MH_CHANGELOG_URL = MH_CHANGELOG_URL;
   self.MH_DONATE_URL = MH_DONATE_URL;
+  self.MH_FEEDBACK_KEY = MH_FEEDBACK_KEY;
+  self.MH_FEEDBACK_ENDPOINT = MH_FEEDBACK_ENDPOINT;
+  self.MH_ISSUES_URL = MH_ISSUES_URL;
 }

@@ -247,6 +247,23 @@ const MH_STRINGS = {
     'opt.about.feedback': 'דיווח על באג או הצעה לשיפור',
     'opt.about.donate': '☕ קנה לי קפה / תודה',
 
+    // Feedback form
+    'opt.section.feedback': '💬 פידבק והצעות',
+    'opt.feedback.desc': 'מצאת באג? יש לך רעיון לפיצ׳ר? כתוב לי כאן וזה יגיע אליי ישירות.',
+    'opt.feedback.type.label': 'סוג',
+    'opt.feedback.type.bug': '🐞 באג',
+    'opt.feedback.type.feature': '💡 הצעת פיצ׳ר',
+    'opt.feedback.type.other': '💬 אחר',
+    'opt.feedback.message.ph': 'כתוב כאן את ההודעה…',
+    'opt.feedback.contact.ph': 'מייל לחזרה (לא חובה)',
+    'opt.feedback.send': 'שלח',
+    'opt.feedback.sending': 'שולח…',
+    'opt.feedback.sent': '✅ תודה! הפידבק נשלח אליי.',
+    'opt.feedback.empty': 'כתוב הודעה לפני השליחה.',
+    'opt.feedback.failed': '⚠️ השליחה נכשלה. נסה שוב, או דרך GitHub.',
+    'opt.feedback.notset': 'טופס הפידבק עדיין לא הוגדר — בינתיים אפשר דרך GitHub Issues.',
+    'opt.feedback.github': 'פתח GitHub Issues',
+
     // Activity type labels (options page file-type picker)
     'ft.resource': 'קובץ (Resource)',
     'ft.folder': 'תיקייה (Folder)',
@@ -535,6 +552,23 @@ const MH_STRINGS = {
     'opt.about.copy': '© {year} E.A — all rights reserved.',
     'opt.about.feedback': 'Report a bug or suggest an improvement',
     'opt.about.donate': '☕ Buy me a coffee',
+
+    // Feedback form
+    'opt.section.feedback': '💬 Feedback & suggestions',
+    'opt.feedback.desc': 'Found a bug? Have a feature idea? Write to me here and it reaches me directly.',
+    'opt.feedback.type.label': 'Type',
+    'opt.feedback.type.bug': '🐞 Bug',
+    'opt.feedback.type.feature': '💡 Feature request',
+    'opt.feedback.type.other': '💬 Other',
+    'opt.feedback.message.ph': 'Write your message here…',
+    'opt.feedback.contact.ph': 'Email for a reply (optional)',
+    'opt.feedback.send': 'Send',
+    'opt.feedback.sending': 'Sending…',
+    'opt.feedback.sent': '✅ Thanks! Your feedback was sent.',
+    'opt.feedback.empty': 'Write a message before sending.',
+    'opt.feedback.failed': '⚠️ Sending failed. Try again, or via GitHub.',
+    'opt.feedback.notset': 'The feedback form isn’t set up yet — for now use GitHub Issues.',
+    'opt.feedback.github': 'Open GitHub Issues',
 
     // Activity type labels (options page file-type picker)
     'ft.resource': 'File (Resource)',
