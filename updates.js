@@ -25,7 +25,7 @@ const MH_DONATE_URL = 'https://ko-fi.com/moodlehoarder';
 // itself never appears in this code. Get a key in 1 minute at web3forms.com
 // (enter your email, copy the key) and paste it here. Leave empty to fall back
 // to the GitHub Issues link.
-const MH_FEEDBACK_KEY = '';
+const MH_FEEDBACK_KEY = '5c375fcc-f783-40eb-a951-9f48741568ba';
 const MH_FEEDBACK_ENDPOINT = 'https://api.web3forms.com/submit';
 const MH_ISSUES_URL = 'https://github.com/eitanav/moodle-hoarder/issues';
 const MH_UPDATE_CHECK_KEY = 'updateCheck';
