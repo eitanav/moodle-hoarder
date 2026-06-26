@@ -791,6 +791,63 @@ def create_server(host: str = "127.0.0.1", port: int = 8765) -> tuple[ThreadingH
     return httpd, state
 
 
+def _core_deps_present() -> bool:
+    """True when the transcription libraries are importable in this interpreter."""
+
+    import importlib.util
+
+    return all(importlib.util.find_spec(mod) is not None for mod in ("faster_whisper", "huggingface_hub"))
+
+
+def _transcriber_venv_python() -> Path | None:
+    """Return the dedicated transcriber/.venv interpreter if it exists."""
+
+    base = Path(__file__).resolve().parents[1]  # transcriber/
+    candidate = base / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    return candidate if candidate.exists() else None
+
+
+def ensure_dependencies() -> None:
+    """Make sure the running interpreter can actually transcribe.
+
+    A common failure mode is launching ``run_web.py`` with whatever Python is on
+    PATH (or a double-click file association) instead of the dedicated
+    ``transcriber/.venv``. That Python has no faster-whisper/huggingface-hub, so
+    transcription fails midway with a confusing error. When that happens, and a
+    ``.venv`` with the libraries exists, transparently relaunch the server using
+    it. Otherwise, print a clear, actionable message and keep serving so the UI
+    still loads.
+    """
+
+    if _core_deps_present() or os.environ.get("MH_TR_REEXEC"):
+        return
+
+    venv_py = _transcriber_venv_python()
+    if venv_py and venv_py.resolve() != Path(sys.executable).resolve():
+        probe = subprocess.run(
+            [str(venv_py), "-c", "import faster_whisper, huggingface_hub"],
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            print(f"Dependencies are missing in this Python ({sys.executable}).")
+            print(f"Relaunching with the transcriber environment: {venv_py}")
+            env = dict(os.environ, MH_TR_REEXEC="1")
+            result = subprocess.run([str(venv_py), *sys.argv], env=env)
+            raise SystemExit(result.returncode)
+
+    req = Path(__file__).resolve().parents[1] / "requirements.txt"
+    print("=" * 72)
+    print("Transcription libraries are NOT installed for this Python:")
+    print(f"  {sys.executable}")
+    print("The web UI will still open, but transcribing will fail until you do one of:")
+    if sys.platform == "win32":
+        print("  1) Close this and double-click  transcriber\\run_web_windows.bat  (recommended)")
+    else:
+        print("  1) Run it via the dedicated virtual environment (see transcriber/README.md)")
+    print(f'  2) Install the libraries here:  "{sys.executable}" -m pip install -r "{req}"')
+    print("=" * 72)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -799,6 +856,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
     args = parser.parse_args(argv)
+
+    ensure_dependencies()
 
     httpd, _ = create_server(args.host, args.port)
     url = f"http://{args.host}:{args.port}/"

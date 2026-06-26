@@ -265,7 +265,8 @@ def transcribe_file(
             requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
             raise RuntimeError(
                 "Missing dependency faster-whisper. "
-                "On Windows, run transcriber\\run_gui_windows.bat so it can install dependencies automatically. "
+                "On Windows, launch via transcriber\\run_web_windows.bat (or run_gui_windows.bat) so it can "
+                "install dependencies automatically into the dedicated .venv. "
                 f"Manual install for this Python: {sys.executable} -m pip install -r {requirements_path}"
             )
 

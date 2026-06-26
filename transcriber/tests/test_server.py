@@ -34,6 +34,20 @@ class ServerHelpersTest(unittest.TestCase):
         self.assertAlmostEqual(server._percent_for("Decoded 9s-10s (100.0%): hi", 0), 100.0)
         self.assertIsNone(server._percent_for("Loading model", 0))
 
+    def test_ensure_dependencies_does_not_relaunch_when_sentinel_set(self):
+        import os
+
+        # With the re-exec sentinel set, ensure_dependencies must never try to
+        # relaunch or exit, even if the libraries are missing in this Python.
+        os.environ["MH_TR_REEXEC"] = "1"
+        try:
+            self.assertIsNone(server.ensure_dependencies())
+        finally:
+            os.environ.pop("MH_TR_REEXEC", None)
+
+    def test_core_deps_present_returns_bool(self):
+        self.assertIsInstance(server._core_deps_present(), bool)
+
 
 class QueueTest(unittest.TestCase):
     def setUp(self):
