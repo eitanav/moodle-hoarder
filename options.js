@@ -300,10 +300,12 @@ async function sendFeedback() {
       if (msgEl) msgEl.value = '';
       const c = $('#feedbackContact'); if (c) c.value = '';
     } else {
-      if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed')) + githubLink;
+      const reason = (data && data.message) ? data.message : ('HTTP ' + res.status);
+      if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed') + ' — ' + reason) + githubLink;
     }
-  } catch {
-    if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed')) + githubLink;
+  } catch (e) {
+    const reason = (e && e.message) ? e.message : String(e);
+    if (status) status.innerHTML = escapeHtml(t('opt.feedback.failed') + ' — ' + reason) + githubLink;
   } finally {
     if (btn) btn.disabled = false;
   }
