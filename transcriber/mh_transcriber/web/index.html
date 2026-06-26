@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moodle Hoarder — תמלול מקומי</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%23dc2867'/%3E%3Cpath d='M15 32V16l9 9 9-9v16' stroke='%23fff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script>
+    // Apply the saved theme/accent before paint to avoid a flash.
+    (function () {
+      try {
+        var t = localStorage.getItem('mh-tr-theme');
+        if (t === 'dark') document.documentElement.classList.add('mh-theme-dark');
+        else if (t === 'light') document.documentElement.classList.add('mh-theme-light');
+        if (localStorage.getItem('mh-tr-accent') === 'blue') document.documentElement.classList.add('mh-accent-blue');
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="app">
+    <header class="appbar">
+      <svg class="logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="3" y="3" width="42" height="42" rx="11" fill="rgba(255,255,255,0.18)"/>
+        <path d="M15 32V16l9 9 9-9v16" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="titles">
+        <h1>Moodle Hoarder — תמלול מקומי</h1>
+        <div class="sub">מחסני קבצים · תמלול ברצף · TXT / SRT / VTT / JSON</div>
+      </div>
+      <div class="actions">
+        <button class="iconbtn" id="btn-accent" title="החלף צבע הדגשה">🎨</button>
+        <button class="iconbtn" id="btn-theme" title="מצב תצוגה (בהיר/כהה/מערכת)">🌓</button>
+        <button class="iconbtn" id="btn-settings" title="הגדרות">⚙️</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="head">
+          <h2>מחסנים</h2>
+          <button class="btn btn-sm btn-primary" id="btn-new-warehouse">+ חדש</button>
+        </div>
+        <ul class="warehouse-list" id="warehouse-list"></ul>
+      </aside>
+
+      <main class="content" id="content">
+        <!-- rendered by app.js -->
+      </main>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div class="modal-backdrop" id="settings-modal">
+    <div class="modal">
+      <div class="mhead">
+        <h2>הגדרות</h2>
+        <button class="iconbtn" id="btn-close-settings" title="סגור">✕</button>
+      </div>
+      <div class="mbody">
+        <div class="field">
+          <div class="flabel">תיקיית פלט לתמלולים</div>
+          <div class="fhint">לכל מחסן נוצרת תת-תיקייה בשם המחסן בתוך התיקייה הזו.</div>
+          <div class="fcontrol">
+            <input type="text" class="grow mono" id="set-output-dir" placeholder="C:\Users\...\Transcripts">
+            <button class="btn btn-sm" id="set-pick-output">בחר תיקייה…</button>
+            <button class="btn btn-sm" id="set-open-output">פתח</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">פורמטים שיווצרו</div>
+          <div class="fhint">בחר אילו קבצים ייכתבו לכל תמלול.</div>
+          <div class="fcontrol"><div class="chips" id="set-formats"></div></div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">מודל Whisper</div>
+          <div class="fhint">large-v3-turbo מומלץ ל-GPU; small/base מהירים יותר ל-CPU.</div>
+          <div class="fcontrol"><select id="set-model"></select></div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">שפה</div>
+          <div class="fhint">קוד שפה (he לעברית). ריק = זיהוי אוטומטי.</div>
+          <div class="fcontrol"><input type="text" id="set-language" style="width:120px" placeholder="he"></div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">חומרה</div>
+          <div class="fhint">Device ו-Compute type. auto בוחר אוטומטית.</div>
+          <div class="fcontrol">
+            <label>Device <select id="set-device"></select></label>
+            <label>Compute <select id="set-compute"></select></label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">Beam size</div>
+          <div class="fhint">גבוה יותר = איכות מעט טובה יותר, איטי יותר (1–10).</div>
+          <div class="fcontrol"><input type="number" id="set-beam" min="1" max="10" style="width:90px"></div>
+        </div>
+
+        <div class="field">
+          <div class="fcontrol" style="justify-content:space-between">
+            <div>
+              <div class="flabel">המרת אודיו מוקדמת (ffmpeg)</div>
+              <div class="fhint">ממיר ל-WAV 16kHz לפני התמלול. מומלץ להשאיר דלוק.</div>
+            </div>
+            <input type="checkbox" class="toggle" id="set-preprocess">
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="flabel">מראה</div>
+          <div class="fcontrol">
+            <div class="segmented" id="set-theme">
+              <button data-v="light">בהיר</button>
+              <button data-v="dark">כהה</button>
+              <button data-v="system">מערכת</button>
+            </div>
+            <div class="segmented" id="set-accent">
+              <button data-v="pink">ורוד</button>
+              <button data-v="blue">כחול אריאל</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field" style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" id="btn-cancel-settings">בטל</button>
+          <button class="btn btn-primary" id="btn-save-settings">שמור הגדרות</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" multiple hidden
+         accept="audio/*,video/*,.mp4,.mp3,.m4a,.wav,.webm,.mov,.mkv,.aac,.flac,.ogg">
+  <div class="toast" id="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

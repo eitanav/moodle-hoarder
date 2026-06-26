@@ -8,7 +8,7 @@
 
 > Chrome extension that hoards every file, folder, assignment, syllabus and recording link from an Ariel University Moodle course into one tidy ZIP.
 
-![version](https://img.shields.io/badge/version-2.9.2-orange) ![license](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
+![version](https://img.shields.io/badge/version-2.9.3-orange) ![license](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue) ![platform](https://img.shields.io/badge/Chrome-MV3-brightgreen)
 
 ---
 
@@ -37,7 +37,7 @@
 
 ## כלי תמלול מקומי ניסיוני
 
-נוסף MVP נפרד ב-[`transcriber/`](transcriber/) לתמלול הקלטות קורסים בעברית עם faster-whisper. הכלי כולל GUI קטן ו-CLI, תומך בבחירת מודל, ומייצא `txt`, `srt`, `vtt` ו-`json` עם timestamps.
+נוסף כלי נפרד ב-[`transcriber/`](transcriber/) לתמלול הקלטות קורסים בעברית עם faster-whisper. יש לו **ממשק web מקומי** מעוצב באותו theme של התוסף (מצב כהה/בהיר, מחסני קבצים, גרירה ותמלול ברצף) — מריצים אותו עם `run_web_windows.bat` או `python run_web.py`. בנוסף קיימים גם GUI קטן ו-CLI. כולם תומכים בבחירת מודל ומייצאים `txt`, `srt`, `vtt` ו-`json` עם timestamps.
 
 ## התקנה
 

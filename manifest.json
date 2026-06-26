@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Moodle Hoarder",
-  "version": "2.9.2",
+  "version": "2.9.3",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwXTUyjeh6a5Q0sIqh+kNxnbqMsA4MqK7MGaC6DU0UXP0DNzqGu2XUvJYOKzWEkVschW8f/jxUideZqmNyPQPjR5z1HliJlhLXwuji9uNB8tfG6gT1kdz8uzEEwfeOBIbRjpH1xrZIavQwTJJkZ43r4tXnbZJkFq/UiOe2dPk4cBY4zDnDzaYXug7rTVA+uRwz1HT6gY8GbqAjqBw7PWG6CJJY4y+1ATTfVc3fkezvx7508T/8PQac0of+nZ7NM+quXYZ10e1m8nz4YnGTbBIhF6uQgPct0z3gNIrCdA4bijUA6mPq5I/Wl+yGS55PyzrfTOmJTIH8Dg/8jbHt2j8eQIDAQAB",
   "description": "Hoards every file, folder, assignment, syllabus and recording link from Ariel Moodle courses into tidy ZIPs. Plus Zoom cloud recording links.",
   "permissions": ["activeTab", "downloads", "scripting", "notifications", "storage", "unlimitedStorage", "contextMenus", "debugger", "offscreen", "declarativeNetRequest", "nativeMessaging"],
