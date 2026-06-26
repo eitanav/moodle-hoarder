@@ -3951,6 +3951,20 @@ async function clickZoomPrevPage(tabId) {
 // table row, wait for the detail page to render, collect every /rec/share|play|download
 // URL we can find, then navigate back. Processes from last page backwards so we
 // don't need to find a "go to first page" button.
+// Make sure the Zoom recordings LIST is the visible page before we click a row.
+// After opening one recording's detail page and navigating back, the SPA list
+// can still be mid-transition (or, rarely, the back step overshoots), which made
+// every recording after the first fail to open and silently drop out of the
+// download — the classic "1 of 1" symptom. Additive by design: on the normal
+// path the list is already there and waitForListPage returns within ~100ms, so a
+// recording that already opens fine is unaffected. Recovery only runs on failure
+// and reuses the existing helpers (no resolver helper is modified).
+async function ensureOnZoomList(tabId) {
+  if (await waitForListPage(tabId, 1200)) return true;
+  await navigateBackInZoom(tabId);
+  return waitForListPage(tabId, 6000);
+}
+
 async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
   for (const rec of recordings) {
     rec.shareUrls = [];
@@ -3985,10 +3999,21 @@ async function resolveZoomPlayUrls(tabId, recordings, onProgress) {
       const short = (rec.date || '').slice(0, 12);
       onProgress?.(`(${recDone}/${recordings.length}) [עמוד ${p}] ${rec.topic} — ${short}`);
 
-      const clicked = await clickRecordingRow(tabId, i);
+      // Settle on the list first, then open this row. If the click doesn't land
+      // or the detail page never renders (usually the list was still
+      // transitioning from the previous recording), re-settle and try this same
+      // recording once more before giving up. Only the failure path does extra
+      // work, so a recording that already opens fine behaves exactly as before.
+      await ensureOnZoomList(tabId);
+      let clicked = await clickRecordingRow(tabId, i);
+      let detail = clicked ? await waitForDetailPage(tabId, 8000) : { url: '', urls: [] };
+      if (!clicked || !detail.url) {
+        await ensureOnZoomList(tabId);
+        clicked = await clickRecordingRow(tabId, i);
+        if (clicked) detail = await waitForDetailPage(tabId, 8000);
+      }
       if (!clicked) { rec.error = 'click failed'; continue; }
 
-      const detail = await waitForDetailPage(tabId, 8000);
       rec.detailUrl = detail.url;
       rec.shareUrls = detail.urls;
       if (!rec.shareUrls.length) {
