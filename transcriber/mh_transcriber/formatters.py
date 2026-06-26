@@ -100,6 +100,9 @@ def format_vtt(segments: Sequence[TranscriptSegment]) -> str:
     return "\n".join(blocks).rstrip() + "\n"
 
 
+SUPPORTED_FORMATS = ("txt", "srt", "vtt", "json")
+
+
 def write_outputs(
     *,
     audio_path: Path,
@@ -108,37 +111,64 @@ def write_outputs(
     language: str,
     segments: Iterable[object],
     duration: float | None = None,
+    formats: Iterable[str] | None = None,
 ) -> dict[str, Path]:
-    """Write txt/srt/vtt/json transcript files and return their paths."""
+    """Write the requested transcript files and return their paths.
+
+    ``formats`` selects which outputs to write (any subset of
+    ``SUPPORTED_FORMATS``). When omitted, all four formats are written so older
+    callers keep their previous behaviour.
+    """
+
+    selected = _normalize_formats(formats)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     normalized = normalize_segments(segments)
     stem = audio_path.stem
     base = output_dir / stem
 
-    txt_path = base.with_suffix(".txt")
-    srt_path = base.with_suffix(".srt")
-    vtt_path = base.with_suffix(".vtt")
-    json_path = base.with_suffix(".json")
+    writers = {
+        "txt": lambda: base.with_suffix(".txt").write_text(
+            format_plain_text(normalized), encoding="utf-8"
+        ),
+        "srt": lambda: base.with_suffix(".srt").write_text(
+            format_srt(normalized), encoding="utf-8"
+        ),
+        "vtt": lambda: base.with_suffix(".vtt").write_text(
+            format_vtt(normalized), encoding="utf-8"
+        ),
+        "json": lambda: base.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "schema": "moodle-hoarder-transcript-v1",
+                    "source": str(audio_path),
+                    "model": model_name,
+                    "language": language,
+                    "duration": duration,
+                    "segments": [asdict(segment) for segment in normalized],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        ),
+    }
 
-    txt_path.write_text(format_plain_text(normalized), encoding="utf-8")
-    srt_path.write_text(format_srt(normalized), encoding="utf-8")
-    vtt_path.write_text(format_vtt(normalized), encoding="utf-8")
-    json_path.write_text(
-        json.dumps(
-            {
-                "schema": "moodle-hoarder-transcript-v1",
-                "source": str(audio_path),
-                "model": model_name,
-                "language": language,
-                "duration": duration,
-                "segments": [asdict(segment) for segment in normalized],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    paths: dict[str, Path] = {}
+    for fmt in SUPPORTED_FORMATS:
+        if fmt not in selected:
+            continue
+        writers[fmt]()
+        paths[fmt] = base.with_suffix(f".{fmt}")
+    return paths
 
-    return {"txt": txt_path, "srt": srt_path, "vtt": vtt_path, "json": json_path}
+
+def _normalize_formats(formats: Iterable[str] | None) -> set[str]:
+    """Validate requested formats, defaulting to all supported formats."""
+
+    if formats is None:
+        return set(SUPPORTED_FORMATS)
+    selected = {str(fmt).lower().lstrip(".") for fmt in formats}
+    selected &= set(SUPPORTED_FORMATS)
+    return selected or set(SUPPORTED_FORMATS)

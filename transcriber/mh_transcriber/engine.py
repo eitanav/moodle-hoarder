@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 import importlib
 import importlib.util
 import os
@@ -224,6 +224,7 @@ def transcribe_file(
     beam_size: int = 5,
     progress: ProgressCallback | None = None,
     preprocess_audio: bool = True,
+    formats: Iterable[str] | None = None,
 ) -> dict[str, Path]:
     """Transcribe one media file and export txt/srt/vtt/json files.
 
@@ -329,6 +330,7 @@ def transcribe_file(
         language=language or getattr(info, "language", "unknown"),
         duration=duration,
         segments=segments,
+        formats=formats,
     )
 
     if progress:
