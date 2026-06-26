@@ -1439,9 +1439,24 @@ $('downloadZoomVideos').addEventListener('click', async () => {
     // and saves it via a blob anchor. Runs in the SW so it survives popup close.
     // V2 intentionally exposes no quality chooser: Zoom often provides only one
     // downloadable MP4, so we always request the best candidate it exposes.
-    const dlList = withUrls.map(r => ({
-      playUrl: r.shareUrls[0], filename: transcriptFileStem(r) + '.mp4', topic: r.topic || '', date: r.date || '',
-    }));
+    // Safety net: if the resolver handed back the SAME share URL for several
+    // recordings (a sign Zoom changed its recordings page, so clicking a row no
+    // longer opens that recording's own detail page), we would otherwise
+    // download the same video several times under different names. De-duplicate
+    // by URL and tell the user, so the real problem surfaces instead of wasting
+    // multi-GB downloads on identical files.
+    const dlList = [];
+    const seenPlayUrls = new Set();
+    for (const r of withUrls) {
+      const playUrl = r.shareUrls[0];
+      if (seenPlayUrls.has(playUrl)) continue;
+      seenPlayUrls.add(playUrl);
+      dlList.push({ playUrl, filename: transcriptFileStem(r) + '.mp4', topic: r.topic || '', date: r.date || '' });
+    }
+    if (dlList.length < withUrls.length) {
+      setStatus(`⚠️ זוהו ${withUrls.length} הקלטות אבל רק ${dlList.length} קישורים שונים — נראה שדף ההקלטות של Zoom השתנה, והחילוץ מחזיר את אותו וידאו לכמה הקלטות. מוריד רק את הייחודיות. כדי שאתקן מדויק: סמן "debug network", הרץ 📄, ושלח את הקובץ zoom-detail-debug.`);
+      notify('Moodle Hoarder', `Zoom: רק ${dlList.length}/${withUrls.length} קישורים שונים — ייתכן שינוי בדף Zoom`);
+    }
     setProgress(0, dlList.length);
     const title = zoomHistoryTitle(withUrls);
     chrome.runtime.sendMessage({
