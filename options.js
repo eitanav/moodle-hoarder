@@ -356,7 +356,6 @@ function escapeHtml(s) {
         renderFileTypes(s);
         await renderHistory();
         await renderStats();
-        if (lastUpdateInfo) showUpdateResult(lastUpdateInfo, { showResultLine: false });
       };
     }
     bindRadios(wrap, key, settings, onChange);
@@ -374,25 +373,7 @@ function escapeHtml(s) {
   }
 
   $('#feedbackSend')?.addEventListener('click', sendFeedback);
-
-  // ----- Updates -----
-  const cv = $('#currentVersion');
-  if (cv && typeof mhCurrentVersion === 'function') cv.textContent = 'v' + mhCurrentVersion();
-  $('#updateOpenExt')?.addEventListener('click', () => { if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage(); });
-  $('#updateReloadNow')?.addEventListener('click', () => { if (typeof mhReloadExtension === 'function') mhReloadExtension(); });
-  $('#updateRunNow')?.addEventListener('click', () => runNativeUpdate('#updateBannerStatus', '#updateRunNow'));
-  $('#checkUpdateNow')?.addEventListener('click', async () => {
-    const result = $('#updateCheckResult');
-    if (result) result.textContent = t('opt.updates.checking');
-    const info = await mhCheckForUpdate(true);
-    showUpdateResult(info);
-  });
-  // Passive, throttled check on open — only surface the banner if newer.
-  if (settings.checkUpdates !== false && typeof mhCheckForUpdate === 'function') {
-    mhCheckForUpdate(false)
-      .then(info => { if (info && info.hasUpdate) showUpdateResult(info, { showResultLine: false }); })
-      .catch(() => {});
-  }
+  // (Updates are handled by the Chrome Web Store in this build.)
 
   $('#clearHistory').addEventListener('click', async () => {
     if (!confirm(t('opt.history.clear.confirm'))) return;

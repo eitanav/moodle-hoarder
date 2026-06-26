@@ -401,15 +401,6 @@
 </header>
 
 <main>
-  <div class="banner" id="updateBanner">
-    <div id="updateBannerText"></div>
-    <div class="actions">
-      <button class="tiny" id="updateRunNow" data-i18n="opt.updates.runnow">⬇️ עדכן עכשיו</button>
-      <button class="tiny" id="updateReloadNow" data-i18n="opt.updates.reloadnow">🔄 רענן עכשיו</button>
-      <a class="tiny" id="updateChangelog" href="https://github.com/eitanav/moodle-hoarder/blob/main/CHANGELOG.md" target="_blank" style="align-self:center; color:var(--accent); text-decoration:none;" data-i18n="opt.updates.changelog">מה חדש</a>
-    </div>
-    <div id="updateBannerStatus" style="font-size:11px; margin-top:6px;"></div>
-  </div>
   <div id="initial">
     <button id="scan" data-i18n="btn.scan">סרוק</button>
     <div class="hint" data-i18n="initial.hint">פתח דף קורס במודל או דף "הקורסים שלי", ולחץ "סרוק".</div>
@@ -499,24 +490,6 @@
       <button id="downloadZoomVideos" style="flex:1; min-width:130px;" data-i18n="pop.zoom.videos">🎥 הורד סרטונים (MP4)</button>
     </div>
     <div class="hint" style="margin-top:6px;" data-i18n="pop.zoom.hint">קישורים ותמלילים 📄 — ZIP מהיר עם הכל. סרטונים 🎥 — קבצי MP4 של ההקלטות (200MB עד 2GB לכל אחת), ממשיך ברקע גם אחרי סגירה. הווידאו יורד באיכות הגבוהה ביותר ש-Zoom חושף. אם Windows לא מצליח לפתוח — נסה VLC.</div>
-    <details class="advanced-debug">
-      <summary data-i18n="pop.zoom.debug.summary">🩺 משהו לא עובד? פתח כלי אבחון</summary>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer; color:var(--muted); margin:4px 0 8px;">
-        <input type="checkbox" id="zoomDebugNetwork">
-        <span data-i18n="pop.zoom.debug.network">🎬 תיעוד בקשות רשת לאיתור תקלות (איטי — כ-25 שניות לכל הקלטה)</span>
-      </label>
-      <div class="row-btns" style="margin-top:8px;">
-        <button class="secondary" id="zoomDiagnose" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.diagnose">🩺 דיאגנוסטיקה קצרה</button>
-        <button class="secondary" id="zoomResearch" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.research">🔬 מחקר עמוק</button>
-      </div>
-      <div class="hint" style="margin-top:6px;" data-i18n-html="1" data-i18n="pop.zoom.debug.hint">פתח רק כשמשהו נכשל. דיאגנוסטיקה — בודקת שלב אחר שלב את כל הצנרת. מחקר עמוק — מקליט trace רשת מלא באמצעות <code dir="ltr">chrome.debugger</code>.</div>
-      <div id="zoomDiagResult" style="display:none; margin-top:8px;">
-        <div style="display:flex; gap:6px; margin-bottom:4px;">
-          <button id="zoomDiagCopy" class="secondary" style="flex:1; font-size:12px;" data-i18n="pop.zoom.debug.copy">📋 העתק הכל</button>
-        </div>
-        <textarea id="zoomDiagOut" readonly style="width:100%; height:160px; font-family:monospace; font-size:10px; direction:ltr; white-space:pre; border:1px solid var(--border); border-radius:6px; background:var(--row); color:var(--fg); padding:6px;"></textarea>
-      </div>
-    </details>
   </div>
 
   <div class="progress-wrap" id="progressWrap"><div class="progress-bar" id="progressBar"></div></div>

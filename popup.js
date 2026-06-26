@@ -230,11 +230,7 @@ document.addEventListener('keydown', (e) => {
     console.error('[Moodle Hoarder] refreshQueueArea failed:', e);
   }
 
-  try {
-    await maybeShowUpdateBanner();
-  } catch (e) {
-    console.error('[Moodle Hoarder] update check failed:', e);
-  }
+  // (Update checking is handled by the Chrome Web Store in this build.)
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -262,43 +258,6 @@ async function maybeShowDisclaimer() {
   }, { once: true });
 }
 
-// Throttled "new version available" check (gated by settings.checkUpdates).
-// The banner explains the 2-step unpacked update: run update.bat, then Reload.
-async function maybeShowUpdateBanner() {
-  if (!CACHED_SETTINGS || CACHED_SETTINGS.checkUpdates === false) return;
-  if (typeof mhCheckForUpdate !== 'function') return;
-  const info = await mhCheckForUpdate(false);
-  if (!info || !info.hasUpdate) return;
-  const banner = document.getElementById('updateBanner');
-  const text = document.getElementById('updateBannerText');
-  if (!banner || !text) return;
-  text.textContent = t('pop.update.available', { v: info.latest });
-  banner.classList.add('show');
-  document.getElementById('updateOpenExt')?.addEventListener('click', () => {
-    if (typeof mhOpenExtensionsPage === 'function') mhOpenExtensionsPage();
-  });
-  document.getElementById('updateReloadNow')?.addEventListener('click', () => {
-    if (typeof mhReloadExtension === 'function') mhReloadExtension();
-  });
-  document.getElementById('updateRunNow')?.addEventListener('click', async () => {
-    const status = document.getElementById('updateBannerStatus');
-    const btn = document.getElementById('updateRunNow');
-    if (btn) btn.disabled = true;
-    if (status) status.innerHTML = t('opt.updates.updating');
-    const res = (typeof mhNativeUpdate === 'function') ? await mhNativeUpdate() : { ok: false, error: 'host-missing' };
-    if (btn) btn.disabled = false;
-    if (!status) return;
-    if (res.ok) {
-      status.innerHTML = res.updated
-        ? t('opt.updates.updated', { v: res.after || '' })
-        : t('opt.updates.alreadylatest', { v: res.after || mhCurrentVersion() });
-    } else if (res.error === 'host-missing') {
-      status.innerHTML = t('opt.updates.nohost');
-    } else {
-      status.innerHTML = t('opt.updates.updatefailed', { msg: res.error || res.detail || '' });
-    }
-  });
-}
 
 // Dashboard scan: shared between auto-bootstrap and the manual scan button
 // (in case the auto-scan needs to be retried).
